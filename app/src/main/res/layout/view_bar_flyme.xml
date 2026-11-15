@@ -42,16 +42,16 @@
             android:background="@drawable/bar_corners_bg_flyme" />
     </LinearLayout>
 
-    <!-- Explicit close button so the freeform can be dismissed without force-stop -->
+    <!-- Close button. No theme attrs — this layout is inflated from a Service context. -->
     <ImageButton
         android:id="@+id/closeButton"
         android:layout_width="36dp"
         android:layout_height="36dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
+        android:background="@android:color/transparent"
         android:contentDescription="@string/done"
         android:padding="6dp"
+        android:scaleType="centerInside"
         android:src="@drawable/ic_close"
-        android:tint="#FFFFFFFF"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent" />

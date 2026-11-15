@@ -470,9 +470,12 @@ class FreeformView(
         binding.root.setOnTouchListener(this)
         binding.bottomBar.middleView.setOnTouchListener(this@FreeformView)
         binding.bottomBar.sideView.setOnTouchListener(this@FreeformView)
-        // Explicit close control — dismiss freeform without force-stopping the service
+        // Explicit close control — dismiss freeform without force-stopping the service.
+        // Guard against double-taps and Service-context inflation issues.
         binding.bottomBar.closeButton.setOnClickListener {
-            destroy()
+            if (!isDestroy) {
+                destroy()
+            }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
