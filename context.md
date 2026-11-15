@@ -37,3 +37,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15 session start: Cloned repo, cleaned remote URL of token, inspected latest commit (7ec7ca6). Created initial context.md.
 - 2026-11-15: Created tag v1.0.0 + GitHub Release "1.0.0 – First Stable Release" (non-prerelease). Uploaded Floating-Tab-1.0.0.apk (same binary as alpha-9). Release URL: https://github.com/ckmanuel/Floating-Tab/releases/tag/v1.0.0
 - 2026-11-15: Fixed X/close button. Root cause: top_bar_height=0dp so the button inside topBar was never visible. Added independent closeButton overlaid top-right of cardRoot in view_freeform_flyme.xml + circular background drawable. Wired in FreeformView.kt. Removed dead closeButton from view_bar.xml.
+- 2026-11-15: Released alpha-11-3cd4715 (close button fix). Download: https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-11-3cd4715
