@@ -418,26 +418,31 @@ class FreeformView(
         val screenW = realScreenWidth.toFloat().coerceAtLeast(1f)
         val screenH = realScreenHeight.toFloat().coerceAtLeast(1f)
         val shortSide = min(screenW, screenH)
+        val longSide = max(screenW, screenH)
         val floatFrac = config.floatViewSize.coerceIn(0.18f, 0.40f)
-        // Slightly smaller default mini window so "pop to corner" feels compact
-        val base = shortSide * floatFrac * 0.85f
 
         if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-            // Wide mini window (content is landscape)
-            var w = base.coerceAtMost(screenW * 0.42f)
+            // Landscape content hang-up: size from the long side so it stays readable,
+            // especially when the device itself is also landscape (short-side base was too tiny).
+            val landFrac = (floatFrac * 1.45f).coerceIn(0.30f, 0.55f)
+            var w = (longSide * landFrac).coerceAtMost(screenW * 0.58f)
             var h = w * ratio
-            if (h > screenH * 0.45f) {
-                h = screenH * 0.40f
+            if (h > screenH * 0.52f) {
+                h = screenH * 0.50f
                 w = h / ratio
             }
-            if (w > screenW * 0.50f) {
-                w = screenW * 0.42f
+            if (w > screenW * 0.60f) {
+                w = screenW * 0.55f
                 h = w * ratio
             }
-            hangUpViewWidth = w.roundToInt().coerceAtLeast(48)
-            hangUpViewHeight = h.roundToInt().coerceAtLeast(48)
+            // Floor so landscape hang-up never collapses to a tiny strip
+            w = w.coerceAtLeast(shortSide * 0.42f)
+            h = (w * ratio).coerceAtMost(screenH * 0.52f)
+            hangUpViewWidth = w.roundToInt().coerceAtLeast(96)
+            hangUpViewHeight = h.roundToInt().coerceAtLeast(56)
         } else {
-            // Tall mini window (content is portrait)
+            // Tall mini window (content is portrait) — compact corner pill
+            val base = shortSide * floatFrac * 0.85f
             var w = base.coerceAtMost(screenW * 0.42f)
             var h = w / ratio
             if (h > screenH * 0.50f) {
@@ -1412,8 +1417,15 @@ class FreeformView(
 
     private fun notifyToFloat() {
         if (isZoomOut) {
-            val scaleX: Float = hangUpViewWidth / rootWidth.toFloat()
-            val scaleY: Float = hangUpViewHeight / rootHeight.toFloat()
+            // Refresh hang-up size for current content orientation before animating
+            initFloatViewSize()
+            // Scale relative to the CURRENT freeform window, not full-screen root.
+            // Using rootWidth/rootHeight on a landscape device made portrait freeforms
+            // animate with mismatched X/Y scales (visible squeeze before hang-up).
+            val fw = freeformWidth.toFloat().coerceAtLeast(1f)
+            val fh = freeformHeight.toFloat().coerceAtLeast(1f)
+            val scaleX: Float = hangUpViewWidth / fw
+            val scaleY: Float = hangUpViewHeight / fh
             // Size-based thresholds (resize now uses real LayoutParams with scale=1)
             val sizeRatio = freeformHeight / realScreenHeight.toFloat().coerceAtLeast(1f)
 
