@@ -56,3 +56,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Hang-up (mini) freeform drag also clamped on-screen via shared clampCenterOnScreen(); final snap Y clamped too.
 - 2026-11-15: Released alpha-23-f7ebe3c (hang-up drag on-screen clamp). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-23-f7ebe3c
 - 2026-11-15: Landscape hang-up mini window enlarged (size from long side). Hang-up transition scale now uses freeformWidth/Height instead of rootWidth/Height to stop portrait apps squeezing on landscape devices.
+- 2026-11-15: Released alpha-25-714eddc (larger landscape hang-up + portrait squeeze fix). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-25-714eddc
