@@ -39,9 +39,9 @@ class HomeFragment : Fragment(), View.OnClickListener {
 
     companion object {
         private const val TAG = "HomeFragment"
-        private const val COMMON_QUESTION_ZH = "https://github.com/Live-block/Flyme-FreeForm/blob/master/qa_zh-Hans.md"
-        private const val OPEN_API_ZH = "https://github.com/Live-block/Flyme-FreeForm/blob/master/open_api_zh-Hans.md"
-        private const val JOIN_GROUP = "https://t.me/RePavilion"
+        private const val COMMON_QUESTION = "https://github.com/ckmanuel/Floating-Tab/releases"
+        private const val OPEN_API = "https://github.com/ckmanuel/Floating-Tab/blob/flyme/open_api.md"
+        private const val PROJECT_HOME = "https://github.com/ckmanuel/Floating-Tab"
     }
 
     override fun onCreateView(
@@ -170,18 +170,18 @@ class HomeFragment : Fragment(), View.OnClickListener {
             }
 
             R.id.button_question -> {
-                val uri = Uri.parse(COMMON_QUESTION_ZH)
+                val uri = Uri.parse(COMMON_QUESTION)
                 val intent = Intent(Intent.ACTION_VIEW, uri)
                 startActivity(intent)
             }
 
             R.id.button_open_api -> {
-                val uri = Uri.parse(OPEN_API_ZH)
+                val uri = Uri.parse(OPEN_API)
                 val intent = Intent(Intent.ACTION_VIEW, uri)
                 startActivity(intent)
             }
             R.id.button_join_group -> {
-                val uri = Uri.parse(JOIN_GROUP)
+                val uri = Uri.parse(PROJECT_HOME)
                 val intent = Intent(Intent.ACTION_VIEW, uri)
                 startActivity(intent)
             }
