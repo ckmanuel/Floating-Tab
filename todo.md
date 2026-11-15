@@ -1,1 +1,3 @@
-# 制作流体手势，通过无障碍，这样就可以监听返回了
+# TODO
+
+- Implement fluid gestures through accessibility so the back key can be listened to.

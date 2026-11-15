@@ -6,10 +6,10 @@
         <item name="colorSecondary">?colorPrimary</item>
         <item name="colorSecondaryVariant">?colorSecondary</item>
         <item name="colorOnSecondary">?colorOnPrimary</item>
-        <!--背景颜色-->
+        <!-- Background color -->
         <item name="colorSurface">@color/color_surface</item>
         <item name="android:colorBackground">?colorSurface</item>
-        <!--保证状态栏颜色-->
+        <!-- Keep status bar color -->
         <item name="colorPrimaryDark">?colorSurface</item>
         <item name="android:windowLightStatusBar">?isLightTheme</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
@@ -23,7 +23,7 @@
         <item name="android:textAllCaps">false</item>
     </style>
 
-    <!--Activity做对话框的效果-->
+    <!-- Activity styled as a dialog -->
     <style name="ActivityDialogTheme" parent="Theme.AppCompat.Light.Dialog">
         <item name="android:windowFullscreen">true</item>
         <item name="android:fitsSystemWindows">true</item>

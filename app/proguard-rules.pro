@@ -20,9 +20,9 @@
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
 
-# 混淆会导致序列化失败
+# Obfuscation would break serialization
 -keep class com.sunshine.freeform.bean.MotionEventBean {*;}
-# 不混淆需要hook的类
+# Do not obfuscate classes that need to be hooked
 -keep class com.sunshine.freeform.hook.HookFramework {*;}
 -keep class com.sunshine.freeform.hook.HookMyself {*;}
 -keep class com.sunshine.freeform.hook.HookSystemUI {*;}

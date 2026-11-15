@@ -1,13 +1,22 @@
-# 该仓库已废弃
-## 若有需要，请前往[新仓库](https://github.com/relimus/Flyme-Freeform)
-> 注: 新仓库使用Xposed重构
-> 
-> (不再需要Shizuku 必须使用Xposed)
+# Floating-Tab (Flyme-Freeform fork)
 
-> 解决了许多因等级不够而导致的问题 (例如权限申请时 小窗消失)
+This repository is a fork of the original Mi-Freeform / Flyme freeform project.
 
-> 大幅度提升了运行时性能
+**Goal of this fork:** Build a fully English Android app that provides floating / freeform windows. Target non-rooted devices using Shizuku (and Porter compatibility) where possible.
 
-> 重载问题依旧
->
-> (Virtual Display的分辨率和主屏幕不一致导致)
+> Note: The upstream repository has been deprecated in favor of an Xposed-based rewrite:  
+> https://github.com/relimus/Flyme-Freeform  
+> That version requires Xposed and no longer needs Shizuku.
+
+This fork keeps the Shizuku-oriented path and aims for non-root use.
+
+## Current status
+- Full English translation of documentation and user-facing strings is in progress.
+- Chinese locale resources are being removed.
+- Focus: reliable freeform windows via Shizuku on non-rooted Android 10+.
+
+## License
+See LICENSE.
+
+## Open API
+See [open_api.md](open_api.md) for how other apps can launch freeform windows through this app.
