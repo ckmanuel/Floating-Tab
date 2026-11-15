@@ -64,3 +64,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Landscape-device + sensor/unspecified apps follow device orientation (landscape freeform). Hang-up restore uses freeform LayoutParams + scale=1 so chrome is not squeezed. Added bottom-left fullscreen button (moves task to default display then destroys freeform).
 - 2026-11-15: Released alpha-31-d79b157 (landscape freeform, hang-up chrome, fullscreen btn). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-31-d79b157
 - 2026-11-15: Fixed landscape apps staying portrait — componentName was null at refreshForNewApp (picker only passes EXTRA_INTENT). Fixed fullscreen killing the app — use moveStack/moveRootTaskToDisplay and skip BACK inject when goingFullscreen.
+- 2026-11-15: Released alpha-33-d6f71db (landscape orient + fullscreen fix). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-33-d6f71db
