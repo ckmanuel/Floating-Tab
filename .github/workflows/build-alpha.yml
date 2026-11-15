@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,8 +25,14 @@ jobs:
           java-version: 17
           cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android licenses & install packages
+        run: |
+          set -e
+          # Runner already has Android SDK; install what we need for compileSdk 36
+          yes 2>/dev/null | sdkmanager --licenses >/tmp/licenses.log || true
+          sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          ls "$ANDROID_HOME/platforms" || true
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -47,6 +56,13 @@ jobs:
           cp "$APK" Floating-Tab-alpha.apk
           SHORT_SHA="${GITHUB_SHA::7}"
           echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Floating-Tab-alpha
+          path: Floating-Tab-alpha.apk
+          retention-days: 14
 
       - name: Create alpha pre-release
         uses: softprops/action-gh-release@v2
