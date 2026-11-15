@@ -50,3 +50,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Bar is move-only; separate bottom-right resize button; close+resize auto-hide after 3s, reappear when bar is touched.
 - 2026-11-15 ~18:20 PST session start: Cloned repo (shallow) to /tmp, sanitized remote URL (no token), inspected latest commit b363f9a ("Separate move bar from resize; auto-hide chrome"). Restored context from context.md + todo.md. Ready to assist on next task.
 - 2026-11-15 ~18:30 PST: Added freeform Back button (top-left chrome, injects KEYCODE_BACK into virtual display). Clamped drag so freeform stays fully on-screen. System Home/Recent still only affect fullscreen (desired). System Back still goes to focused fullscreen app until accessibility routing is implemented.
+- 2026-11-15: Released alpha-19-6e55939 (back button + drag clamp). Download: https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-19-6e55939
