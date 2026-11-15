@@ -146,13 +146,26 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
                         }
                     }
                     ForegroundService.SERVICE_TYPE -> {
-                        PermissionUtils.checkPostNotificationPermission(requireActivity())
+                        try {
+                            PermissionUtils.checkPostNotificationPermission(requireActivity())
+                        } catch (_: Exception) {}
                         if (PermissionUtils.isAccessibilitySettingsOn(requireContext())) {
                             accessibilityRFAR.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                             Toast.makeText(requireContext(), getString(R.string.require_stop_accessibility), Toast.LENGTH_SHORT).show()
                             return false
                         } else {
-                            requireContext().startForegroundService(Intent(requireContext(), ForegroundService::class.java))
+                            try {
+                                requireContext().startForegroundService(
+                                    Intent(requireContext(), ForegroundService::class.java)
+                                )
+                            } catch (e: Exception) {
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Failed to start foreground service: ${e.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                return false
+                            }
                         }
                     }
                 }

@@ -117,83 +117,128 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
 
         sp = getSharedPreferences(MiFreeform.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
         sp.registerOnSharedPreferenceChangeListener(this)
-        if (sp.getInt("service_type", KeepAliveService.SERVICE_TYPE) == SERVICE_TYPE) {
-            registerReceiver(startFreeformReceiver, IntentFilter("com.sunshine.freeform.start_freeform"), RECEIVER_EXPORTED)
+        if (sp.getInt("service_type", KeepAliveService.SERVICE_TYPE) != SERVICE_TYPE) {
+            // Not in foreground-service mode — exit cleanly
+            stopSelf()
+            return
+        }
 
-            //q221208.1 修复屏幕旋转后侧边栏不贴边的问题
-            try {
-                // 检查Shizuku是否可用
-                if (!Shizuku.pingBinder()) {
-                    Log.e(TAG, "Shizuku binder is not available, waiting for connection...")
-                    // 尝试重新初始化
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(
+                    startFreeformReceiver,
+                    IntentFilter("com.sunshine.freeform.start_freeform"),
+                    RECEIVER_EXPORTED
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(
+                    startFreeformReceiver,
+                    IntentFilter("com.sunshine.freeform.start_freeform")
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "registerReceiver failed: ${e.message}")
+        }
+
+        // Core window setup must always succeed so startForegroundService from settings
+        // does not leave the process in a half-initialized state.
+        try {
+            displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            displayManager.registerDisplayListener(displayListener, null)
+            defaultDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
+
+            windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            windowLayoutParams = WindowManager.LayoutParams()
+            gestureDetector = GestureDetector(this, this)
+
+            screenWidth = resources.displayMetrics.widthPixels
+            screenHeight = resources.displayMetrics.heightPixels
+            screenRotation = resources.configuration.orientation
+        } catch (e: Exception) {
+            Log.e(TAG, "Core service init failed: ${e.message}")
+            Toast.makeText(this, getString(R.string.request_overlay_permission_fail), Toast.LENGTH_LONG).show()
+            stopSelf()
+            return
+        }
+
+        // Shizuku rotation watcher is optional — missing Shizuku must not crash settings switch
+        try {
+            val shizukuReady = try {
+                Shizuku.pingBinder()
+            } catch (e: Exception) {
+                Log.e(TAG, "Shizuku ping failed: ${e.message}")
+                false
+            }
+            if (!shizukuReady) {
+                Log.e(TAG, "Shizuku not available; continuing without rotation watcher")
+                try {
                     MiFreeform.me.retryInitShizuku()
-                    return
+                } catch (_: Exception) {
                 }
-                
+            } else {
                 iWindowManager = IWindowManager.Stub.asInterface(
-                    ShizukuBinderWrapper(
-                        SystemServiceHelper.getSystemService("window"))
+                    ShizukuBinderWrapper(SystemServiceHelper.getSystemService("window"))
                 )
                 rotationWatcher = object : IRotationWatcher.Stub() {
                     override fun onRotationChanged(rotation: Int) {
                         scope.launch(Dispatchers.Main) {
                             displayRotation = rotation
-
-                            //q220902.3 如果程序崩溃的话，那么resources.configuration.orientation获取到的方向是错误的，所以不应该用该方法
-                            val tempScreenRotation = if (displayRotation == Surface.ROTATION_0 || displayRotation == Surface.ROTATION_180) {
-                                Configuration.ORIENTATION_PORTRAIT
-                            } else {
-                                Configuration.ORIENTATION_LANDSCAPE
-                            }
-
+                            val tempScreenRotation =
+                                if (displayRotation == Surface.ROTATION_0 || displayRotation == Surface.ROTATION_180) {
+                                    Configuration.ORIENTATION_PORTRAIT
+                                } else {
+                                    Configuration.ORIENTATION_LANDSCAPE
+                                }
                             if (tempScreenRotation != screenRotation) {
                                 screenRotation = tempScreenRotation
-
                                 if (screenRotation == Configuration.ORIENTATION_PORTRAIT) {
-                                    screenHeight = max(resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
-                                    screenWidth = min(resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
+                                    screenHeight = max(
+                                        resources.displayMetrics.widthPixels,
+                                        resources.displayMetrics.heightPixels
+                                    )
+                                    screenWidth = min(
+                                        resources.displayMetrics.widthPixels,
+                                        resources.displayMetrics.heightPixels
+                                    )
                                 } else {
-                                    screenWidth = max(resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
-                                    screenHeight = min(resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
+                                    screenWidth = max(
+                                        resources.displayMetrics.widthPixels,
+                                        resources.displayMetrics.heightPixels
+                                    )
+                                    screenHeight = min(
+                                        resources.displayMetrics.widthPixels,
+                                        resources.displayMetrics.heightPixels
+                                    )
                                 }
-
                                 removeFloating()
                                 initConfig()
                                 try {
-                                    chooseAppFloatingView.onScreenRotationChanged(screenRotation)
-                                } catch (e: Exception) {}
+                                    if (::chooseAppFloatingView.isInitialized) {
+                                        chooseAppFloatingView.onScreenRotationChanged(screenRotation)
+                                    }
+                                } catch (_: Exception) {
+                                }
                             }
                         }
                     }
                 }
                 iWindowManager.watchRotation(rotationWatcher, Display.DEFAULT_DISPLAY)
-
-                displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-                displayManager.registerDisplayListener(displayListener, null)
-                defaultDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
-
-                windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-                windowLayoutParams = WindowManager.LayoutParams()
-
-                gestureDetector = GestureDetector(this, this)
-
-                screenWidth = resources.displayMetrics.widthPixels
-                screenHeight = resources.displayMetrics.heightPixels
-                screenRotation = resources.configuration.orientation
-
-                initConfig()
-                chooseAppFloatingView = ChooseAppFloatingView(this, config.positionX, this)
-                startService(Intent(this, FreeformService::class.java))
-            } catch (e: Exception) {
-                Toast.makeText(this, getString(R.string.request_overlay_permission_fail), Toast.LENGTH_LONG).show()
             }
-        } else {
-            //如果不是前台服务模式，则关闭服务
-            stopSelf()
+        } catch (e: Exception) {
+            Log.e(TAG, "Rotation watcher setup failed: ${e.message}")
+        }
+
+        try {
+            initConfig()
+            chooseAppFloatingView = ChooseAppFloatingView(this, config.positionX, this)
+            startService(Intent(this, FreeformService::class.java))
+        } catch (e: Exception) {
+            Log.e(TAG, "Floating / FreeformService init failed: ${e.message}")
+            Toast.makeText(this, getString(R.string.request_overlay_permission_fail), Toast.LENGTH_LONG).show()
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.Q)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val notificationIntent = Intent(this, FloatingActivity::class.java)
@@ -218,21 +263,49 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
         val notification = builder.build()
         notification.flags = Notification.FLAG_ONGOING_EVENT or Notification.FLAG_NO_CLEAR
 
-        startForeground(3, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MANIFEST)
+        // Use declared manifest types; FOREGROUND_SERVICE_TYPE_MANIFEST is API 34+ only
+        // and can crash on older devices when starting from settings.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(3, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MANIFEST)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                3,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            startForeground(3, notification)
+        }
 
         return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        displayManager.unregisterDisplayListener(displayListener)
+        try {
+            if (::displayManager.isInitialized) {
+                displayManager.unregisterDisplayListener(displayListener)
+            }
+        } catch (_: Exception) {}
         if (isShowingFloating) removeFloating()
-        sp.unregisterOnSharedPreferenceChangeListener(this)
-
-        unregisterReceiver(startFreeformReceiver)
-
-        iWindowManager.removeRotationWatcher(rotationWatcher)
-        stopService(Intent(this, FreeformService::class.java))
+        try {
+            if (::sp.isInitialized) {
+                sp.unregisterOnSharedPreferenceChangeListener(this)
+            }
+        } catch (_: Exception) {}
+        try {
+            unregisterReceiver(startFreeformReceiver)
+        } catch (_: Exception) {}
+        try {
+            if (::iWindowManager.isInitialized && ::rotationWatcher.isInitialized) {
+                iWindowManager.removeRotationWatcher(rotationWatcher)
+            }
+        } catch (_: Exception) {}
+        try {
+            stopService(Intent(this, FreeformService::class.java))
+        } catch (_: Exception) {}
     }
 
     /**
