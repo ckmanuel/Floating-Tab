@@ -122,22 +122,6 @@
             app:layout_constraintBottom_toBottomOf="@id/cardRoot"
             app:layout_constraintEnd_toEndOf="@id/cardRoot" />
 
-        <!-- Fullscreen (bottom-left): exit freeform to native full-screen app -->
-        <ImageButton
-            android:id="@+id/fullscreenButton"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:layout_marginBottom="8dp"
-            android:layout_marginStart="8dp"
-            android:background="@drawable/close_button_bg"
-            android:contentDescription="@string/done"
-            android:padding="6dp"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_fullscreen"
-            android:elevation="8dp"
-            android:visibility="visible"
-            app:layout_constraintBottom_toBottomOf="@id/cardRoot"
-            app:layout_constraintStart_toStartOf="@id/cardRoot" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

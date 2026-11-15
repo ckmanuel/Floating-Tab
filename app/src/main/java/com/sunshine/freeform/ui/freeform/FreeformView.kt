@@ -72,8 +72,6 @@ class FreeformView(
     //该小窗是否已经销毁
     var isDestroy = false
 
-    /** True while promoting the freeform task to the real full-screen display. */
-    private var goingFullscreen = false
 
     // 修复动画过程中调整方向导致的问题
     private var isAnimating = false
@@ -650,12 +648,6 @@ class FreeformView(
                 destroy()
             }
         }
-        binding.fullscreenButton.setOnClickListener {
-            // Landscape-native freeforms must not use fullscreen — it kills those apps.
-            if (!isDestroy && virtualDisplayRotation != VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-                goFullscreen()
-            }
-        }
         binding.resizeButton.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -718,74 +710,6 @@ class FreeformView(
 
         binding.freeformRoot.alpha = 1f
         binding.textureView.alpha = 0f
-    }
-
-    /**
-     * Exit freeform and move the task to the default display as a normal full-screen app.
-     * Order matters: reparent/relaunch first, skip BACK in destroy, then tear down overlay only.
-     */
-    private fun goFullscreen() {
-        if (isDestroy || goingFullscreen) return
-        goingFullscreen = true
-        try {
-            controlHandler.removeCallbacks(hideControlsRunnable)
-            binding.backButton.visibility = View.GONE
-            binding.closeButton.visibility = View.GONE
-            binding.resizeButton.visibility = View.GONE
-            binding.fullscreenButton.visibility = View.GONE
-        } catch (_: Exception) {
-        }
-
-        // Snapshot before any async work
-        val displayId = virtualDisplay.display.displayId
-        val tasks = ArrayList(taskList)
-        val cn = config.componentName
-        val userId = config.userId
-
-        scope.launch(Dispatchers.Main) {
-            var moved = false
-            try {
-                // 1) Shell move-stack (ControlService)
-                val cs = runCatching { com.sunshine.freeform.app.MiFreeform.me.controlService }.getOrNull()
-                if (cs != null) {
-                    moved = runCatching { cs.moveStack(displayId) }.getOrDefault(false)
-                }
-                // 2) ActivityTaskManager moveRootTaskToDisplay
-                if (!moved && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    for (tId in tasks) {
-                        val ok = runCatching {
-                            activityTaskManager.moveRootTaskToDisplay(tId, Display.DEFAULT_DISPLAY)
-                            true
-                        }.getOrDefault(false)
-                        if (ok) moved = true
-                    }
-                }
-                // 3) Shell: am start on display 0 (keeps the activity alive)
-                if (!moved && cn != null && cs != null) {
-                    val cmd = "am start -n ${cn.packageName}/${cn.className} --user $userId --display 0"
-                    moved = runCatching { cs.execShell(cmd, false) }.getOrDefault(false)
-                }
-                // 4) Service relaunch on default display
-                if (!moved) {
-                    runCatching {
-                        context.startService(
-                            Intent(context, FreeformService::class.java)
-                                .setAction(FreeformService.ACTION_CALL_INTENT)
-                                .putExtra(FreeformService.EXTRA_DISPLAY_ID, Display.DEFAULT_DISPLAY)
-                        )
-                        moved = true
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "goFullscreen move failed", e)
-            }
-            // Wait longer for landscape apps — orientation change on default display is slower
-            kotlinx.coroutines.delay(if (moved) 350 else 100)
-            if (!isDestroy) {
-                // destroy skips BACK when goingFullscreen
-                destroy()
-            }
-        }
     }
 
     private fun performBackKey() {
@@ -1364,18 +1288,12 @@ class FreeformView(
             binding.backButton.animate().cancel()
             binding.closeButton.animate().cancel()
             binding.resizeButton.animate().cancel()
-            binding.fullscreenButton.animate().cancel()
             binding.backButton.visibility = View.VISIBLE
             binding.closeButton.visibility = View.VISIBLE
             binding.resizeButton.visibility = View.VISIBLE
-            // Fullscreen is unreliable for landscape-native apps (kills the task).
-            // Hide it whenever the freeform content is landscape — phone portrait or landscape.
-            val landscapeApp = virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
-            binding.fullscreenButton.visibility = if (landscapeApp) View.GONE else View.VISIBLE
             binding.backButton.alpha = 1f
             binding.closeButton.alpha = 1f
             binding.resizeButton.alpha = 1f
-            binding.fullscreenButton.alpha = if (landscapeApp) 0f else 1f
             // Ensure chrome is not left scaled from hang-up restore
             binding.backButton.scaleX = 1f
             binding.backButton.scaleY = 1f
@@ -1383,8 +1301,6 @@ class FreeformView(
             binding.closeButton.scaleY = 1f
             binding.resizeButton.scaleX = 1f
             binding.resizeButton.scaleY = 1f
-            binding.fullscreenButton.scaleX = 1f
-            binding.fullscreenButton.scaleY = 1f
         } catch (_: Exception) {
         }
         scheduleHideWindowControls()
@@ -1403,8 +1319,6 @@ class FreeformView(
             binding.resizeButton.animate().alpha(0f).setDuration(200).withEndAction {
                 if (!controlsVisible) binding.resizeButton.visibility = View.GONE
             }.start()
-            binding.fullscreenButton.animate().alpha(0f).setDuration(200).withEndAction {
-                if (!controlsVisible) binding.fullscreenButton.visibility = View.GONE
             }.start()
         } catch (_: Exception) {
         }
@@ -1770,7 +1684,6 @@ class FreeformView(
                                             binding.backButton.visibility = View.GONE
                                             binding.closeButton.visibility = View.GONE
                                             binding.resizeButton.visibility = View.GONE
-                                            binding.fullscreenButton.visibility = View.GONE
                                         } catch (_: Exception) {
                                         }
                                     },
@@ -1794,29 +1707,29 @@ class FreeformView(
                     start()
                 }
             } else if (sizeRatio >= goFullScale) {
+                // Fullscreen promotion removed — snap back to normal freeform size
                 AnimatorSet().apply {
                     playTogether(
                         ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, 1f),
                         ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, mScaleY, 1f),
-                        ObjectAnimator.ofFloat(binding.bottomBar.root, View.ALPHA, 0f),
-                        cardViewMarginAnim(
-                            (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).topMargin,
-                            (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).bottomMargin,
-                            (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).rightMargin,
-                            0,
-                            0,
-                            0,
-                        ),
                     )
                     addListener(
                         onStart = { isAnimating = true },
                         onEnd = {
                             isAnimating = false
-                            // Same path as the fullscreen chrome button
-                            goFullscreen()
+                            mScaleX = 1f
+                            mScaleY = 1f
+                            refreshFreeformSize()
+                            runCatching {
+                                windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                                    width = freeformWidth
+                                    height = freeformHeight
+                                })
+                            }
+                            showWindowControls()
                         }
                     )
-                    duration = 300
+                    duration = 200
                     start()
                 }
             } else {
@@ -2363,9 +2276,7 @@ class FreeformView(
 
         // 清理虚拟显示
         runCatching {
-            // Skip BACK when promoting to fullscreen — BACK was finishing the app.
-            // Only inject BACK for normal freeform close (helps dismiss IME).
-            if (!goingFullscreen && virtualDisplay.surface != null) {
+            if (virtualDisplay.surface != null) {
                 performBackKey()
                 SystemClock.sleep(100)
             }
@@ -2521,18 +2432,13 @@ class FreeformView(
                 }
             }
 
-            // Going fullscreen: leave the task on the default display
-            if (goingFullscreen && newDisplayId == Display.DEFAULT_DISPLAY) {
-                return
-            }
-
             if (taskList.contains(tId) && isFloating && newDisplayId == Display.DEFAULT_DISPLAY) {
                 context.startService(Intent(context, FreeformService::class.java).setAction(FreeformService.ACTION_START_INTENT).putExtra(Intent.EXTRA_INTENT, config.intent))
                 return
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (!isDestroy && !goingFullscreen && taskList.contains(tId) && newDisplayId == Display.DEFAULT_DISPLAY) {
+                if (!isDestroy && taskList.contains(tId) && newDisplayId == Display.DEFAULT_DISPLAY) {
                     if (config.useSuiRefuseToFullScreen)
                         activityTaskManager.moveRootTaskToDisplay(tId, virtualDisplay.display.displayId)
                     else

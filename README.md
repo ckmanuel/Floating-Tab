@@ -41,9 +41,7 @@ Based on the open-source Mi-Freeform / Flyme freeform work, maintained here as *
 | Back (top-left) | Back inside the freeform app |
 | Close (top-right) | Close the freeform |
 | Hang-up | Shrink to a corner mini window |
-| Fullscreen (bottom-left) | Portrait freeforms only — promote to full screen |
 
-Landscape-native apps intentionally do not show the fullscreen control (that path was unsafe for those apps).
 
 ## Alpha builds
 
