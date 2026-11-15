@@ -82,6 +82,10 @@ class FreeformView(
 
     //小窗中应用的taskId
     private var taskList = ArrayList<Int>()
+    // Deferred work to run once the TextureView has bound a surface to the VirtualDisplay.
+    // Used so we never startActivity on a null-surface VD (black landscape apps).
+    @Volatile private var surfaceReadyCallback: (() -> Unit)? = null
+
 
     // 输入法高度检测相关变量
     private var isKeyboardVisible = false
@@ -359,14 +363,16 @@ class FreeformView(
         // open in landscape content mode even while the phone is still portrait.
         applyInitialAppOrientation()
 
-        val baseShort = min(realScreenHeight, realScreenWidth)
+        val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
+        val longSide = max(realScreenWidth, realScreenHeight).coerceAtLeast(48)
+        val shortSide = min(realScreenWidth, realScreenHeight).coerceAtLeast(48)
         if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-            // Landscape content: width > height inside the virtual display
-            freeformScreenWidth = (baseShort / config.widthHeightRatio).roundToInt()
-            freeformScreenHeight = (freeformScreenWidth * config.widthHeightRatio).roundToInt()
+            // Landscape content: width along long edge, height along short — always clamped
+            freeformScreenWidth = (shortSide / ratio).roundToInt().coerceAtLeast(48).coerceAtMost(longSide)
+            freeformScreenHeight = (freeformScreenWidth * ratio).roundToInt().coerceAtLeast(48).coerceAtMost(shortSide)
         } else {
-            freeformScreenHeight = (baseShort / config.widthHeightRatio).roundToInt()
-            freeformScreenWidth = (freeformScreenHeight * config.widthHeightRatio).roundToInt()
+            freeformScreenHeight = (shortSide / ratio).roundToInt().coerceAtLeast(48).coerceAtMost(longSide)
+            freeformScreenWidth = (freeformScreenHeight * ratio).roundToInt().coerceAtLeast(48).coerceAtMost(shortSide)
         }
 
         config.rememberPosition = viewModel.getBooleanSp("remember_freeform_position", false)
@@ -423,13 +429,20 @@ class FreeformView(
             val baseShort = min(realScreenHeight, realScreenWidth).coerceAtLeast(1)
             val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
             if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-                freeformScreenWidth = (baseShort / ratio).roundToInt().coerceAtLeast(48)
+                // Landscape content: width along the long physical edge, height along short.
+                val longSide = max(realScreenWidth, realScreenHeight).coerceAtLeast(48)
+                val shortSide = min(realScreenWidth, realScreenHeight).coerceAtLeast(48)
+                freeformScreenWidth = (shortSide / ratio).roundToInt().coerceAtLeast(48)
                 freeformScreenHeight = (freeformScreenWidth * ratio).roundToInt().coerceAtLeast(48)
-                freeformScreenWidth = freeformScreenWidth.coerceAtMost(max(realScreenWidth, realScreenHeight).coerceAtLeast(48))
-                freeformScreenHeight = freeformScreenHeight.coerceAtMost(min(realScreenWidth, realScreenHeight).coerceAtLeast(48))
+                freeformScreenWidth = freeformScreenWidth.coerceAtMost(longSide)
+                freeformScreenHeight = freeformScreenHeight.coerceAtMost(shortSide)
             } else {
-                freeformScreenHeight = (baseShort / ratio).roundToInt().coerceAtLeast(48)
+                val longSide = max(realScreenWidth, realScreenHeight).coerceAtLeast(48)
+                val shortSide = min(realScreenWidth, realScreenHeight).coerceAtLeast(48)
+                freeformScreenHeight = (shortSide / ratio).roundToInt().coerceAtLeast(48)
                 freeformScreenWidth = (freeformScreenHeight * ratio).roundToInt().coerceAtLeast(48)
+                freeformScreenHeight = freeformScreenHeight.coerceAtMost(longSide)
+                freeformScreenWidth = freeformScreenWidth.coerceAtMost(shortSide)
             }
             initFloatViewSize()
 
@@ -499,6 +512,27 @@ class FreeformView(
         } catch (_: Exception) {
             false
         }
+    }
+
+    /** True when the VirtualDisplay already has a live surface. */
+    fun hasVirtualDisplaySurface(): Boolean {
+        return try {
+            virtualDisplay.surface != null
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Run [action] as soon as the TextureView has bound a surface to the VirtualDisplay.
+     * If a surface is already present, runs immediately on the calling thread.
+     */
+    fun runWhenSurfaceReady(action: () -> Unit) {
+        if (hasVirtualDisplaySurface()) {
+            action()
+            return
+        }
+        surfaceReadyCallback = action
     }
 
     private fun orientationToVirtualRotation(requestedOrientation: Int): Int {
@@ -837,8 +871,15 @@ class FreeformView(
                 width: Int,
                 height: Int
             ) {
-                surface.setDefaultBufferSize(freeformScreenWidth, freeformScreenHeight)
+                surface.setDefaultBufferSize(
+                    freeformScreenWidth.coerceAtLeast(48),
+                    freeformScreenHeight.coerceAtLeast(48)
+                )
                 virtualDisplay.surface = Surface(surface)
+                // Launch any deferred startIntent now that the VD can actually draw
+                val cb = surfaceReadyCallback
+                surfaceReadyCallback = null
+                cb?.invoke()
             }
 
             override fun onSurfaceTextureSizeChanged(
@@ -1013,17 +1054,15 @@ class FreeformView(
         try {
             // Recalculate virtual-display size from a stable base that matches current device orientation.
             // Layer 2 only: content orientation follows the app; outer window stays driven by system orientation.
-            val baseShort = min(realScreenHeight, realScreenWidth).coerceAtLeast(1)
             val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
+            val longSide = max(realScreenWidth, realScreenHeight).coerceAtLeast(48)
+            val shortSide = min(realScreenWidth, realScreenHeight).coerceAtLeast(48)
             if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_PORTRAIT) {
-                freeformScreenHeight = (baseShort / ratio).roundToInt().coerceAtLeast(48)
-                freeformScreenWidth = (freeformScreenHeight * ratio).roundToInt().coerceAtLeast(48)
+                freeformScreenHeight = (shortSide / ratio).roundToInt().coerceAtLeast(48).coerceAtMost(longSide)
+                freeformScreenWidth = (freeformScreenHeight * ratio).roundToInt().coerceAtLeast(48).coerceAtMost(shortSide)
             } else {
-                // Landscape content: cap to physical screen so overlay add/update never exceeds display
-                freeformScreenWidth = (baseShort / ratio).roundToInt().coerceAtLeast(48)
-                freeformScreenHeight = (freeformScreenWidth * ratio).roundToInt().coerceAtLeast(48)
-                freeformScreenWidth = freeformScreenWidth.coerceAtMost(max(realScreenWidth, realScreenHeight))
-                freeformScreenHeight = freeformScreenHeight.coerceAtMost(min(realScreenWidth, realScreenHeight))
+                freeformScreenWidth = (shortSide / ratio).roundToInt().coerceAtLeast(48).coerceAtMost(longSide)
+                freeformScreenHeight = (freeformScreenWidth * ratio).roundToInt().coerceAtLeast(48).coerceAtMost(shortSide)
             }
 
             initFloatViewSize()
@@ -1197,10 +1236,14 @@ class FreeformView(
         clampToScreen()
         clampToScreen()
 
+        // Hard clamp to physical screen — landscape content must never produce a
+        // freeform larger than the current display on either axis.
         freeformWidth = (contentW + marginW).roundToInt()
-            .coerceIn(48, screenW.roundToInt())
+            .coerceIn(48, screenW.roundToInt().coerceAtLeast(48))
         freeformHeight = (contentH + marginH).roundToInt()
-            .coerceIn(48, screenH.roundToInt())
+            .coerceIn(48, screenH.roundToInt().coerceAtLeast(48))
+        if (freeformWidth > realScreenWidth) freeformWidth = realScreenWidth.coerceAtLeast(48)
+        if (freeformHeight > realScreenHeight) freeformHeight = realScreenHeight.coerceAtLeast(48)
     }
     private fun refreshScale() {
         // Keep visual scale at 1 — freeform size is applied via LayoutParams.
@@ -2293,33 +2336,28 @@ class FreeformView(
         isFloating = false
         showWindowControls()
 
-        // Move freeform tasks back to the default display before tearing down the
-        // virtual display surface. Injecting BACK left landscape apps in a broken
-        // state on the VD (black screen / "crash" on next freeform launch). Moving
-        // them off cleanly lets the next freeform session start fresh.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val ids = taskList.toList()
-            taskList.clear()
-            for (tId in ids) {
-                runCatching {
-                    activityTaskManager.moveRootTaskToDisplay(tId, Display.DEFAULT_DISPLAY)
-                }.onFailure { e ->
-                    android.util.Log.w(TAG, "moveRootTaskToDisplay($tId) failed on close", e)
-                }
+        // Close freeform tasks without moving them to the default display.
+        // Moving to DEFAULT_DISPLAY left a fullscreen-sized task that the next
+        // freeform launch reused → black first open / enormous freeform size.
+        // Instead: BACK to finish, then best-effort am task remove, then drop surface.
+        val ids = taskList.toList()
+        taskList.clear()
+        surfaceReadyCallback = null
+
+        runCatching {
+            if (virtualDisplay.surface != null) {
+                performBackKey()
+                SystemClock.sleep(120)
             }
-            // Brief settle so the system finishes the display transfer before surface release
-            if (ids.isNotEmpty()) {
-                SystemClock.sleep(80)
-            }
-        } else {
-            // Pre-Q fallback: BACK is the only option we have
+        }
+
+        // Best-effort remove residual tasks so the next launch is a clean start
+        for (tId in ids) {
             runCatching {
-                if (virtualDisplay.surface != null) {
-                    performBackKey()
-                    SystemClock.sleep(100)
-                }
+                com.sunshine.freeform.utils.ShellUtils.execCommandWithShizuku(
+                    "am task remove $tId", false
+                )
             }
-            taskList.clear()
         }
 
         runCatching {

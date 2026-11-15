@@ -113,18 +113,20 @@ class FreeformService: Service(), ScreenListener.ScreenStateListener {
                 // Re-detect this activity's native orientation so alternating
                 // portrait/landscape apps do not keep the previous display mode.
                 mFreeformView.refreshForNewApp()
-                // After a full destroy the TextureView surface is not yet attached.
-                // Show the window first so VirtualDisplay gets a surface, then launch
-                // the activity — otherwise landscape apps often start black and stay broken.
+
+                // After destroy the TextureView has no surface yet. Show the window
+                // first, then start the activity only when the surface is bound.
+                // A fixed sleep was too short → black landscape freeforms; moving
+                // tasks to the default display on close caused oversized reopens.
                 if (wasDestroyed) {
                     startFreeformView()
-                    // Give the surface a brief moment to bind before startActivity
-                    android.os.SystemClock.sleep(50)
-                }
-                if (startIntent() < 0) {
-                    return START_NOT_STICKY
-                }
-                if (!wasDestroyed) {
+                    mFreeformView.runWhenSurfaceReady {
+                        startIntent()
+                    }
+                } else {
+                    if (startIntent() < 0) {
+                        return START_NOT_STICKY
+                    }
                     startFreeformView()
                 }
             }
@@ -202,6 +204,9 @@ class FreeformService: Service(), ScreenListener.ScreenStateListener {
                    withoutAnim: Boolean = true,
                    userId: Int = mUserId,
     ): Int {
+        // NEW_TASK so freeform does not reuse a leftover fullscreen-sized task
+        // from a previous session (that produced black / oversized freeforms).
+        intent.flags = intent.flags or Intent.FLAG_ACTIVITY_NEW_TASK
         if (withoutAnim) intent.flags = intent.flags or Intent.FLAG_ACTIVITY_NO_ANIMATION
         return activityManager.startActivityAsUserWithFeature(
             null, SHELL, null, intent,
