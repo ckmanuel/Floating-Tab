@@ -209,12 +209,16 @@ class FreeformView(
     private var mScaleX = 1f
         set(value) {
             field = value
-            binding.freeformRoot.scaleX = value
+            if (::binding.isInitialized) {
+                try { binding.freeformRoot.scaleX = value } catch (_: Exception) {}
+            }
         }
     private var mScaleY = 1f
         set(value) {
             field = value
-            binding.freeformRoot.scaleY = value
+            if (::binding.isInitialized) {
+                try { binding.freeformRoot.scaleY = value } catch (_: Exception) {}
+            }
         }
 
     // 触发互动的比例
@@ -414,56 +418,68 @@ class FreeformView(
      * apps do not keep the previous virtual-display orientation.
      */
     fun refreshForNewApp() {
-        val previous = virtualDisplayRotation
-        applyInitialAppOrientation()
+        try {
+            val previous = virtualDisplayRotation
+            applyInitialAppOrientation()
 
-        val baseShort = min(realScreenHeight, realScreenWidth).coerceAtLeast(1)
-        val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
-        if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-            freeformScreenWidth = (baseShort / ratio).roundToInt().coerceAtLeast(48)
-            freeformScreenHeight = (freeformScreenWidth * ratio).roundToInt().coerceAtLeast(48)
-        } else {
-            freeformScreenHeight = (baseShort / ratio).roundToInt().coerceAtLeast(48)
-            freeformScreenWidth = (freeformScreenHeight * ratio).roundToInt().coerceAtLeast(48)
-        }
-        initFloatViewSize()
-
-        // Always resize the virtual display to the new content orientation before frames arrive
-        runCatching {
-            virtualDisplay.resize(freeformScreenWidth, freeformScreenHeight, config.freeformDpi)
-        }
-
-        if (isDestroy) return
-        if (!::binding.isInitialized) return
-
-        // Window may not be attached yet (showWindow not called) — only update live layout if attached.
-        // Calling updateViewLayout on a detached view crashes the freeform process.
-        val attached = try {
-            binding.root.isAttachedToWindow
-        } catch (_: Exception) {
-            false
-        }
-        if (!attached) return
-
-        if (previous != virtualDisplayRotation && !isFloating) {
-            onFreeFormRotationChanged()
-        } else if (!isFloating) {
-            refreshFreeformSize()
-            resetScale()
-            runCatching {
-                windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                    width = freeformWidth.coerceAtLeast(48)
-                    height = freeformHeight.coerceAtLeast(48)
-                })
+            val baseShort = min(realScreenHeight, realScreenWidth).coerceAtLeast(1)
+            val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
+            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+                freeformScreenWidth = (baseShort / ratio).roundToInt().coerceAtLeast(48)
+                freeformScreenHeight = (freeformScreenWidth * ratio).roundToInt().coerceAtLeast(48)
+                freeformScreenWidth = freeformScreenWidth.coerceAtMost(max(realScreenWidth, realScreenHeight).coerceAtLeast(48))
+                freeformScreenHeight = freeformScreenHeight.coerceAtMost(min(realScreenWidth, realScreenHeight).coerceAtLeast(48))
+            } else {
+                freeformScreenHeight = (baseShort / ratio).roundToInt().coerceAtLeast(48)
+                freeformScreenWidth = (freeformScreenHeight * ratio).roundToInt().coerceAtLeast(48)
             }
-        } else {
-            // Hang-up: keep mini size in sync; full layout applies on restore
+            initFloatViewSize()
+
+            // Always resize the virtual display to the new content orientation before frames arrive
             runCatching {
-                windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                    width = hangUpViewWidth.coerceAtLeast(48)
-                    height = hangUpViewHeight.coerceAtLeast(48)
-                })
+                virtualDisplay.resize(
+                    freeformScreenWidth.coerceAtLeast(48),
+                    freeformScreenHeight.coerceAtLeast(48),
+                    config.freeformDpi.coerceAtLeast(120)
+                )
             }
+
+            if (isDestroy) return
+            if (!::binding.isInitialized) return
+
+            val attached = try {
+                binding.root.isAttachedToWindow
+            } catch (_: Exception) {
+                false
+            }
+            if (!attached) return
+
+            // Prefer a full rotation refresh when content orientation changed
+            if (previous != virtualDisplayRotation && !isFloating) {
+                onFreeFormRotationChanged()
+            } else if (!isFloating) {
+                refreshFreeformSize()
+                freeformWidth = freeformWidth.coerceIn(48, realScreenWidth.coerceAtLeast(48))
+                freeformHeight = freeformHeight.coerceIn(48, realScreenHeight.coerceAtLeast(48))
+                mScaleX = 1f
+                mScaleY = 1f
+                runCatching { initFloatBar() }
+                runCatching {
+                    windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                        width = freeformWidth
+                        height = freeformHeight
+                    })
+                }
+            } else {
+                runCatching {
+                    windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                        width = hangUpViewWidth.coerceAtLeast(48)
+                        height = hangUpViewHeight.coerceAtLeast(48)
+                    })
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "refreshForNewApp failed", e)
         }
     }
 
@@ -705,7 +721,7 @@ class FreeformView(
 
     /**
      * Exit freeform and move the task to the default display as a normal full-screen app.
-     * Uses moveStack (shell) / moveRootTaskToDisplay — does NOT inject BACK (that killed the app).
+     * Order matters: reparent/relaunch first, skip BACK in destroy, then tear down overlay only.
      */
     private fun goFullscreen() {
         if (isDestroy || goingFullscreen) return
@@ -719,37 +735,55 @@ class FreeformView(
         } catch (_: Exception) {
         }
 
+        // Snapshot before any async work
+        val displayId = virtualDisplay.display.displayId
+        val tasks = ArrayList(taskList)
+        val cn = config.componentName
+        val userId = config.userId
+
         scope.launch(Dispatchers.Main) {
             var moved = false
-            // Preferred: ControlService shell move-stack to display 0
-            runCatching {
-                moved = com.sunshine.freeform.app.MiFreeform.me.controlService
-                    ?.moveStack(virtualDisplay.display.displayId) == true
-            }
-            // Fallback: move each tracked task via ActivityTaskManager
-            if (!moved && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val tasks = ArrayList(taskList)
-                for (tId in tasks) {
+            try {
+                // 1) Shell move-stack (ControlService)
+                val cs = runCatching { com.sunshine.freeform.app.MiFreeform.me.controlService }.getOrNull()
+                if (cs != null) {
+                    moved = runCatching { cs.moveStack(displayId) }.getOrDefault(false)
+                }
+                // 2) ActivityTaskManager moveRootTaskToDisplay
+                if (!moved && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    for (tId in tasks) {
+                        val ok = runCatching {
+                            activityTaskManager.moveRootTaskToDisplay(tId, Display.DEFAULT_DISPLAY)
+                            true
+                        }.getOrDefault(false)
+                        if (ok) moved = true
+                    }
+                }
+                // 3) Shell: am start on display 0 (keeps the activity alive)
+                if (!moved && cn != null && cs != null) {
+                    val cmd = "am start -n ${cn.packageName}/${cn.className} --user $userId --display 0"
+                    moved = runCatching { cs.execShell(cmd, false) }.getOrDefault(false)
+                }
+                // 4) Service relaunch on default display
+                if (!moved) {
                     runCatching {
-                        activityTaskManager.moveRootTaskToDisplay(tId, Display.DEFAULT_DISPLAY)
+                        context.startService(
+                            Intent(context, FreeformService::class.java)
+                                .setAction(FreeformService.ACTION_CALL_INTENT)
+                                .putExtra(FreeformService.EXTRA_DISPLAY_ID, Display.DEFAULT_DISPLAY)
+                        )
                         moved = true
                     }
                 }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "goFullscreen move failed", e)
             }
-            // Last resort: relaunch the activity on the default display
-            if (!moved && config.componentName != null) {
-                runCatching {
-                    context.startService(
-                        Intent(context, FreeformService::class.java)
-                            .setAction(FreeformService.ACTION_CALL_INTENT)
-                            .putExtra(FreeformService.EXTRA_DISPLAY_ID, Display.DEFAULT_DISPLAY)
-                    )
-                    moved = true
-                }
+            // Wait longer for landscape apps — orientation change on default display is slower
+            kotlinx.coroutines.delay(if (moved) 350 else 100)
+            if (!isDestroy) {
+                // destroy skips BACK when goingFullscreen
+                destroy()
             }
-            // Give the system a moment to reparent the task before tearing down the VD
-            kotlinx.coroutines.delay(if (moved) 200 else 50)
-            if (!isDestroy) destroy()
         }
     }
 
@@ -923,9 +957,11 @@ class FreeformView(
 
         // Window bounds = visible freeform size so touch region matches what you see
         refreshFreeformSize()
+        freeformWidth = freeformWidth.coerceIn(48, realScreenWidth.coerceAtLeast(48))
+        freeformHeight = freeformHeight.coerceIn(48, realScreenHeight.coerceAtLeast(48))
         windowLayoutParams.apply {
-            width = freeformWidth.coerceAtLeast(48)
-            height = freeformHeight.coerceAtLeast(48)
+            width = freeformWidth
+            height = freeformHeight
             x = 0
             y = 0
         }
@@ -1037,37 +1073,46 @@ class FreeformView(
 
     private fun onFreeFormRotationChanged() {
         if (isDestroy) return
+        try {
+            // Recalculate virtual-display size from a stable base that matches current device orientation.
+            // Layer 2 only: content orientation follows the app; outer window stays driven by system orientation.
+            val baseShort = min(realScreenHeight, realScreenWidth).coerceAtLeast(1)
+            val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
+            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_PORTRAIT) {
+                freeformScreenHeight = (baseShort / ratio).roundToInt().coerceAtLeast(48)
+                freeformScreenWidth = (freeformScreenHeight * ratio).roundToInt().coerceAtLeast(48)
+            } else {
+                // Landscape content: cap to physical screen so overlay add/update never exceeds display
+                freeformScreenWidth = (baseShort / ratio).roundToInt().coerceAtLeast(48)
+                freeformScreenHeight = (freeformScreenWidth * ratio).roundToInt().coerceAtLeast(48)
+                freeformScreenWidth = freeformScreenWidth.coerceAtMost(max(realScreenWidth, realScreenHeight))
+                freeformScreenHeight = freeformScreenHeight.coerceAtMost(min(realScreenWidth, realScreenHeight))
+            }
 
-        // Recalculate virtual-display size from a stable base that matches current device orientation.
-        // Layer 2 only: content orientation follows the app; outer window stays driven by system orientation.
-        val baseShort = min(realScreenHeight, realScreenWidth).coerceAtLeast(1)
-        val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
-        if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_PORTRAIT) {
-            freeformScreenHeight = (baseShort / ratio).roundToInt().coerceAtLeast(48)
-            freeformScreenWidth = (freeformScreenHeight * ratio).roundToInt().coerceAtLeast(48)
-        } else {
-            freeformScreenWidth = (baseShort / ratio).roundToInt().coerceAtLeast(48)
-            freeformScreenHeight = (freeformScreenWidth * ratio).roundToInt().coerceAtLeast(48)
-        }
-
-        initFloatViewSize()
-        refreshFreeformSize()
-        resetScale()
-        resizeVirtualDisplay()
-        if (!::binding.isInitialized) return
-        runCatching {
-            binding.freeformRoot.scaleX = 1f
-            binding.freeformRoot.scaleY = 1f
+            initFloatViewSize()
+            refreshFreeformSize()
+            // Clamp outer window to physical screen (landscape device + landscape content can overshoot)
+            freeformWidth = freeformWidth.coerceIn(48, realScreenWidth.coerceAtLeast(48))
+            freeformHeight = freeformHeight.coerceIn(48, realScreenHeight.coerceAtLeast(48))
             mScaleX = 1f
             mScaleY = 1f
-            if (binding.root.isAttachedToWindow) {
-                windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                    width = freeformWidth.coerceAtLeast(48)
-                    height = freeformHeight.coerceAtLeast(48)
-                    x = 0
-                    y = 0
-                })
+            resizeVirtualDisplay()
+            if (!::binding.isInitialized) return
+            runCatching { initFloatBar() }
+            runCatching {
+                binding.freeformRoot.scaleX = 1f
+                binding.freeformRoot.scaleY = 1f
+                if (binding.root.isAttachedToWindow) {
+                    windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                        width = freeformWidth
+                        height = freeformHeight
+                        x = 0
+                        y = 0
+                    })
+                }
             }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "onFreeFormRotationChanged failed", e)
         }
     }
 
