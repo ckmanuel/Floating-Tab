@@ -97,7 +97,8 @@ class FreeformService: Service(), ScreenListener.ScreenStateListener {
             return START_NOT_STICKY
         when (intent.action) {
             ACTION_START_INTENT -> {
-                if (mFreeformView.isDestroy) {
+                val wasDestroyed = mFreeformView.isDestroy
+                if (wasDestroyed) {
                     initFreeformView()
                 }
                 mUserId = intent.getIntExtra(Intent.EXTRA_USER, 0)
@@ -112,10 +113,20 @@ class FreeformService: Service(), ScreenListener.ScreenStateListener {
                 // Re-detect this activity's native orientation so alternating
                 // portrait/landscape apps do not keep the previous display mode.
                 mFreeformView.refreshForNewApp()
+                // After a full destroy the TextureView surface is not yet attached.
+                // Show the window first so VirtualDisplay gets a surface, then launch
+                // the activity — otherwise landscape apps often start black and stay broken.
+                if (wasDestroyed) {
+                    startFreeformView()
+                    // Give the surface a brief moment to bind before startActivity
+                    android.os.SystemClock.sleep(50)
+                }
                 if (startIntent() < 0) {
                     return START_NOT_STICKY
                 }
-                startFreeformView()
+                if (!wasDestroyed) {
+                    startFreeformView()
+                }
             }
             ACTION_CALL_INTENT -> {
                 if (mIntent == null)

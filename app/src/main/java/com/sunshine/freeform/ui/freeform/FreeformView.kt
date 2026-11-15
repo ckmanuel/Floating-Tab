@@ -461,12 +461,22 @@ class FreeformView(
                 freeformHeight = freeformHeight.coerceIn(48, realScreenHeight.coerceAtLeast(48))
                 mScaleX = 1f
                 mScaleY = 1f
+                // Touch mapping must match the new freeformScreen ↔ window size ratio
+                // (was missing → inaccurate touch after landscape→portrait app switch)
+                refreshTouchScale()
                 runCatching { initFloatBar() }
                 runCatching {
                     windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
                         width = freeformWidth
                         height = freeformHeight
                     })
+                }
+                // Keep SurfaceTexture buffer in sync when surface already exists
+                runCatching {
+                    binding.textureView.surfaceTexture?.setDefaultBufferSize(
+                        freeformScreenWidth.coerceAtLeast(48),
+                        freeformScreenHeight.coerceAtLeast(48)
+                    )
                 }
             } else {
                 runCatching {
@@ -895,6 +905,8 @@ class FreeformView(
         binding.freeformRoot.scaleY = 1f
         mScaleX = 1f
         mScaleY = 1f
+        // Ensure touch → virtual-display mapping is correct every time the window is shown
+        refreshTouchScale()
 
         // Full-screen dim layer must NOT take touches — otherwise the whole screen
         // is blocked and the user cannot interact with apps behind the freeform.
@@ -1035,6 +1047,14 @@ class FreeformView(
                         y = 0
                     })
                 }
+            }
+            // Touch scale must follow content orientation / freeformScreen size changes
+            refreshTouchScale()
+            runCatching {
+                binding.textureView.surfaceTexture?.setDefaultBufferSize(
+                    freeformScreenWidth.coerceAtLeast(48),
+                    freeformScreenHeight.coerceAtLeast(48)
+                )
             }
         } catch (e: Exception) {
             android.util.Log.e(TAG, "onFreeFormRotationChanged failed", e)
@@ -2273,12 +2293,33 @@ class FreeformView(
         isFloating = false
         showWindowControls()
 
-        // 清理虚拟显示
-        runCatching {
-            if (virtualDisplay.surface != null) {
-                performBackKey()
-                SystemClock.sleep(100)
+        // Move freeform tasks back to the default display before tearing down the
+        // virtual display surface. Injecting BACK left landscape apps in a broken
+        // state on the VD (black screen / "crash" on next freeform launch). Moving
+        // them off cleanly lets the next freeform session start fresh.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val ids = taskList.toList()
+            taskList.clear()
+            for (tId in ids) {
+                runCatching {
+                    activityTaskManager.moveRootTaskToDisplay(tId, Display.DEFAULT_DISPLAY)
+                }.onFailure { e ->
+                    android.util.Log.w(TAG, "moveRootTaskToDisplay($tId) failed on close", e)
+                }
             }
+            // Brief settle so the system finishes the display transfer before surface release
+            if (ids.isNotEmpty()) {
+                SystemClock.sleep(80)
+            }
+        } else {
+            // Pre-Q fallback: BACK is the only option we have
+            runCatching {
+                if (virtualDisplay.surface != null) {
+                    performBackKey()
+                    SystemClock.sleep(100)
+                }
+            }
+            taskList.clear()
         }
 
         runCatching {
@@ -2286,7 +2327,7 @@ class FreeformView(
             windowManager.removeViewImmediate(backgroundView)
         }
         if (virtualDisplay.surface != null) {
-            virtualDisplay.surface.release()
+            runCatching { virtualDisplay.surface.release() }
             virtualDisplay.surface = null
         }
 

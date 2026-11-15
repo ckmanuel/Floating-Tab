@@ -16,15 +16,11 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - **v1.0.0 First Stable Release** published (2026-11-15) based on commit 7ec7ca6 / former alpha-9.
   - Download: https://github.com/ckmanuel/Floating-Tab/releases/tag/v1.0.0
   - APK: Floating-Tab-1.0.0.apk (signed debug)
-- **v1.1 base** (current flyme HEAD ~ alpha-28): Restored stable freeform from renumbered alpha-25 (424f9ed). **Fullscreen chrome / goFullscreen path fully removed** (it was blanking landscape freeforms). Oversize gesture now snaps back to freeform size.
-- Post-1.0.0 freeform improvements retained:
-  - Close button fixed (independent top-right control).
-  - Freeform sizing: clamp to physical screen, preserve orientation/aspect, defaults 90-95%.
-  - Move bar is move-only; separate bottom-right resize grip.
-  - Close + resize chrome auto-hides after 3s idle; reappears on move-bar touch.
-  - **Back button** on freeform chrome (top-left): injects KEYCODE_BACK into the virtual display.
-  - **Drag clamped** so freeform cannot be moved off the physical screen.
-- Known open item from todo.md: Implement fluid gestures through accessibility so the system back key can be routed to the last-touched window (freeform vs fullscreen). Home/Recent already only affect the fullscreen task.
+- **v1.1 base** (flyme): Restored stable freeform from renumbered alpha-25. Fullscreen chrome fully removed.
+- **In progress fix (session)**: touch inaccuracy after landscape→portrait app switch + landscape apps black-screening on reenter after freeform close.
+  - Root causes: (1) refreshTouchScale not called after size/orientation changes; (2) close only injected BACK + released surface, leaving landscape tasks broken on the VD; (3) after destroy, startIntent ran before TextureView surface was attached.
+  - Fixes: always refreshTouchScale + buffer size on refresh/rotation/show; on destroy move freeform tasks to DEFAULT_DISPLAY instead of BACK; after destroy show window (attach surface) before startIntent.
+- Known open item from todo.md: Implement fluid gestures through accessibility so the system back key can be routed to the last-touched window (freeform vs fullscreen).
 
 ## Memory Entries
 (Update existing entries; do not duplicate.)
