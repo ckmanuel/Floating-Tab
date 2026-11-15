@@ -92,7 +92,10 @@ class FreeformView(
 
     //物理屏幕方向
     private var screenRotation = defaultDisplay.rotation
-    //虚拟屏幕方向，1 竖屏， 0 横屏
+    // Layer 2 — content orientation of the virtual display.
+    // 1 = portrait, 0 = landscape. Driven only by the app's requestedOrientation
+    // (TaskStackListener). We never force orientation on the activity itself.
+    // Layer 1 (outer freeform window size/position) follows system screenRotation.
     private var virtualDisplayRotation = VIRTUAL_DISPLAY_ROTATION_PORTRAIT
 
     private val iRotationWatcher = object : IRotationWatcher.Stub() {
@@ -175,24 +178,25 @@ class FreeformView(
     private var hangUpViewWidth = 0
 
     // root
+    // Outer freeform window size follows system orientation (layer 1).
+    // Content orientation (virtualDisplayRotation) only adjusts so landscape apps
+    // remain usable when the device is already landscape.
     private var rootHeight = 0
         get() {
-            var tmp = if (FreeformHelper.screenIsPortrait(screenRotation)) realScreenHeight else realScreenWidth
-            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-                tmp = ((rootWidth * config.widthHeightRatio) + cardHeightMargin).roundToInt()
-                if (!FreeformHelper.screenIsPortrait(screenRotation)) {
-                    tmp = realScreenHeight
-                }
+            return if (FreeformHelper.screenIsPortrait(screenRotation)) {
+                realScreenHeight
+            } else {
+                // Device landscape: use the shorter physical side as the "height" of the overlay
+                realScreenHeight
             }
-            return tmp
         }
     private var rootWidth = 0
         get() {
-            var tmp = if (FreeformHelper.screenIsPortrait(screenRotation)) realScreenWidth else realScreenHeight
-            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-                tmp = realScreenWidth
+            return if (FreeformHelper.screenIsPortrait(screenRotation)) {
+                realScreenWidth
+            } else {
+                realScreenWidth
             }
-            return tmp
         }
 
     // 小窗缩放比例
@@ -335,8 +339,21 @@ class FreeformView(
 
         initFloatViewSize()
 
-        freeformScreenHeight = (min(realScreenHeight, realScreenWidth) / config.widthHeightRatio).roundToInt()
-        freeformScreenWidth = (freeformScreenHeight * config.widthHeightRatio).roundToInt()
+        // Two-layer orientation:
+        // - Outer freeform window follows system/device orientation (screenRotation).
+        // - Virtual display / content follows the app's native requested orientation
+        //   (set later by TaskStackListener). Initial size uses current device orientation
+        //   so landscape device already gets a usable starting size.
+        if (FreeformHelper.screenIsPortrait(screenRotation)) {
+            freeformScreenHeight = (min(realScreenHeight, realScreenWidth) / config.widthHeightRatio).roundToInt()
+            freeformScreenWidth = (freeformScreenHeight * config.widthHeightRatio).roundToInt()
+        } else {
+            // Device is landscape: start with landscape-friendly virtual display size
+            freeformScreenWidth = (min(realScreenHeight, realScreenWidth) / config.widthHeightRatio).roundToInt()
+            freeformScreenHeight = (freeformScreenWidth * config.widthHeightRatio).roundToInt()
+            // Still default virtualDisplayRotation to portrait until the app reports its preference.
+            // The first orientation callback will flip it if the app is landscape-native.
+        }
 
         config.rememberPosition = viewModel.getBooleanSp("remember_freeform_position", false)
         if (config.rememberPosition) {
@@ -747,17 +764,19 @@ class FreeformView(
     private fun onFreeFormRotationChanged() {
         if (isDestroy) return
 
-        val tempHeight = max(freeformScreenHeight, freeformScreenWidth)
-        val tempWidth = min(freeformScreenHeight, freeformScreenWidth)
+        // Recalculate virtual-display size from a stable base that matches current device orientation.
+        // Layer 2 only: content orientation follows the app; outer window stays driven by system orientation.
+        val baseShort = min(realScreenHeight, realScreenWidth)
+        val baseLong = max(realScreenHeight, realScreenWidth)
+        if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_PORTRAIT) {
+            freeformScreenHeight = (baseShort / config.widthHeightRatio).roundToInt()
+            freeformScreenWidth = (freeformScreenHeight * config.widthHeightRatio).roundToInt()
+        } else {
+            freeformScreenWidth = (baseShort / config.widthHeightRatio).roundToInt()
+            freeformScreenHeight = (freeformScreenWidth * config.widthHeightRatio).roundToInt()
+        }
 
         initFloatViewSize()
-        if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_PORTRAIT) {
-            freeformScreenHeight = tempHeight
-            freeformScreenWidth = tempWidth
-        } else {
-            freeformScreenHeight = tempWidth
-            freeformScreenWidth = tempHeight
-        }
         refreshFreeformSize()
         resetScale()
         resizeVirtualDisplay()
@@ -856,26 +875,36 @@ class FreeformView(
     }
 
     private fun refreshFreeformSize() {
+        // Layer 1: outer freeform window follows system orientation + user size prefs.
+        // Layer 2: when content is landscape we still keep a usable outer size,
+        // especially when the device itself is landscape (no more tiny portrait-width window).
         if (FreeformHelper.screenIsPortrait(screenRotation)) {
-            // 竖屏状态，以宽度为基准计算，确保宽高比正确
             freeformWidth = (rootWidth * config.freeformSize).roundToInt()
             val contentHeight = (freeformWidth - (freeformShadow * 2)) / config.widthHeightRatio
             freeformHeight = (contentHeight + cardHeightMargin).roundToInt()
-        } else {
-            // 横屏状态保持原有逻辑
-            freeformHeight = (rootWidth * config.freeformSizeLand).roundToInt()
-            freeformHeight += cardHeightMargin.roundToInt()
-            freeformWidth = ((freeformHeight + cardWidthMargin) * config.widthHeightRatio).roundToInt()
-        }
-        
-        if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-            if (freeformHeight > rootWidth) {
-                freeformWidth = (rootWidth - (rootWidth * 0.05)).roundToInt()
-                freeformHeight = ((freeformWidth + (cardHeightMargin * 1.75)) * config.widthHeightRatio) .roundToInt()
+            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+                // Portrait device + landscape content: keep outer portrait-shaped,
+                // virtual display itself is landscape (content will letterbox/scale inside).
+                // Slightly wider freeform so landscape content is less cramped.
+                freeformWidth = (rootWidth * (config.freeformSize + 0.05f).coerceAtMost(0.95f)).roundToInt()
+                freeformHeight = ((freeformWidth - (freeformShadow * 2)) / config.widthHeightRatio + cardHeightMargin).roundToInt()
             }
-            if (!FreeformHelper.screenIsPortrait(screenRotation)) {
-                freeformWidth = (realScreenWidth / 2 + cardWidthMargin).roundToInt()
-                freeformHeight = ((freeformWidth * config.widthHeightRatio) * 0.95).roundToInt()
+        } else {
+            // Device is landscape
+            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+                // Landscape device + landscape content: use a large usable size
+                freeformWidth = (realScreenWidth * config.freeformSizeLand).roundToInt()
+                freeformHeight = ((freeformWidth * config.widthHeightRatio) + cardWidthMargin).roundToInt()
+                // Cap so it does not exceed screen
+                if (freeformHeight > realScreenHeight * 0.95f) {
+                    freeformHeight = (realScreenHeight * 0.9f).roundToInt()
+                    freeformWidth = ((freeformHeight - cardWidthMargin) / config.widthHeightRatio).roundToInt()
+                }
+            } else {
+                // Landscape device + portrait content
+                freeformHeight = (rootHeight * config.freeformSizeLand).roundToInt()
+                freeformHeight += cardHeightMargin.roundToInt()
+                freeformWidth = ((freeformHeight + cardWidthMargin) * config.widthHeightRatio).roundToInt()
             }
         }
     }
@@ -1248,12 +1277,20 @@ class FreeformView(
                         onStart = { isAnimating = true },
                         onEnd = {
                             isAnimating = false
+                            // Move the task back to the default display first, then tear down
+                            // the freeform window. This reduces crashes for landscape-native apps
+                            // that previously raced with virtual-display teardown.
                             context.startService(
                                 Intent(context, FreeformService::class.java)
                                     .setAction(FreeformService.ACTION_CALL_INTENT)
                                     .putExtra(FreeformService.EXTRA_DISPLAY_ID, defaultDisplay.displayId)
                             )
-                            destroy()
+                            // Small delay so the activity can settle on the default display
+                            // before we release the virtual display.
+                            scope.launch {
+                                kotlinx.coroutines.delay(150)
+                                if (!isDestroy) destroy()
+                            }
                         }
                     )
                     duration = 300
