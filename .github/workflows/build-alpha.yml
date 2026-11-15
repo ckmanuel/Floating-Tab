@@ -31,7 +31,6 @@ jobs:
           set -e
           echo "ANDROID_HOME=$ANDROID_HOME"
           ls -la "$ANDROID_HOME" || true
-          find "$ANDROID_HOME" -name sdkmanager -type f 2>/dev/null | head -5
           SDKMANAGER=$(find "$ANDROID_HOME" -name sdkmanager -type f 2>/dev/null | head -1)
           if [ -z "$SDKMANAGER" ]; then
             echo "sdkmanager not found, downloading cmdline-tools..."
@@ -50,23 +49,46 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build release APK
-        run: ./gradlew assembleRelease --stacktrace --no-daemon
+      # assembleDebug is auto-signed with the Android debug keystore.
+      # assembleRelease produced an UNSIGNED apk (no signingConfig in the project),
+      # which Android rejects as "package invalid".
+      - name: Build signed debug APK (alpha)
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
         env:
           GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m"
 
-      - name: Prepare APK artifact
+      - name: Prepare and verify APK
         id: apk
         run: |
+          set -e
           APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
           if [ -z "$APK" ]; then
-            echo "No APK found under app/build/outputs/apk"
+            echo "No APK found"
             find app/build/outputs -type f 2>/dev/null || true
             exit 1
           fi
           echo "Found: $APK"
           ls -lh "$APK"
           cp "$APK" Floating-Tab-alpha.apk
+
+          # Verify it is signed
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f 2>/dev/null | sort -V | tail -1)
+          if [ -n "$APKSIGNER" ]; then
+            echo "Verifying signature with $APKSIGNER"
+            "$APKSIGNER" verify --verbose Floating-Tab-alpha.apk || {
+              echo "APK is not properly signed"
+              exit 1
+            }
+          else
+            # Fallback: check for META-INF signature files
+            if ! unzip -l Floating-Tab-alpha.apk | grep -qE 'META-INF/.*\.(RSA|DSA|EC)$'; then
+              echo "ERROR: APK has no signature block"
+              unzip -l Floating-Tab-alpha.apk | grep META-INF || true
+              exit 1
+            fi
+            echo "Signature files present"
+          fi
+
           SHORT_SHA="${GITHUB_SHA::7}"
           echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
 
@@ -81,21 +103,24 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: alpha-${{ github.run_number }}-${{ steps.apk.outputs.short_sha }}
-          name: Alpha build #${{ github.run_number }}
+          name: Alpha build #${{ github.run_number }} (signed debug)
           body: |
-            **Alpha build for testing**
+            **Alpha build for testing (signed debug APK)**
 
             - Branch: `${{ github.ref_name }}`
             - Commit: `${{ github.sha }}`
-            - Includes two-layer orientation fix (outer freeform follows system, content follows app native orientation)
+            - Signed with the Android debug keystore (installable)
+            - Includes two-layer orientation fix
+
+            ### Previous alpha was unsigned
+            The earlier `assembleRelease` APK had no signing config and was rejected by Android as "package invalid". This build uses `assembleDebug` so it is properly signed.
 
             ### How to test
-            1. Install this APK (uninstall previous build first if the signature differs).
-            2. Grant Shizuku, accessibility, and overlay permissions as required.
-            3. Open landscape-native apps (YouTube, games, etc.) in freeform while the phone is portrait **and** while it is landscape.
-            4. Try freeform → full screen on those apps.
-
-            Report any remaining orientation or crash issues on the repo.
+            1. Uninstall any previous version of the app first.
+            2. Install this APK.
+            3. Grant Shizuku, accessibility, and overlay permissions as required.
+            4. Open landscape-native apps in freeform (portrait and landscape device orientation).
+            5. Try freeform → full screen on those apps.
           files: Floating-Tab-alpha.apk
           prerelease: true
           generate_release_notes: false
