@@ -1319,7 +1319,6 @@ class FreeformView(
             binding.resizeButton.animate().alpha(0f).setDuration(200).withEndAction {
                 if (!controlsVisible) binding.resizeButton.visibility = View.GONE
             }.start()
-            }.start()
         } catch (_: Exception) {
         }
     }
