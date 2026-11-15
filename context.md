@@ -16,12 +16,14 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - **v1.0.0 First Stable Release** published (2026-11-15) based on commit 7ec7ca6 / former alpha-9.
   - Download: https://github.com/ckmanuel/Floating-Tab/releases/tag/v1.0.0
   - APK: Floating-Tab-1.0.0.apk (signed debug)
-- Post-1.0.0 work on flyme branch (latest: b363f9a):
+- Post-1.0.0 work on flyme branch:
   - Close button fixed (independent top-right control).
   - Freeform sizing: clamp to physical screen, preserve orientation/aspect, defaults 90-95%.
   - Move bar is move-only; separate bottom-right resize grip.
   - Close + resize chrome auto-hides after 3s idle; reappears on move-bar touch.
-- Known open item from todo.md: Implement fluid gestures through accessibility so the back key can be listened to.
+  - **Back button** on freeform chrome (top-left): injects KEYCODE_BACK into the virtual display.
+  - **Drag clamped** so freeform cannot be moved off the physical screen.
+- Known open item from todo.md: Implement fluid gestures through accessibility so the system back key can be routed to the last-touched window (freeform vs fullscreen). Home/Recent already only affect the fullscreen task.
 
 ## Memory Entries
 (Update existing entries; do not duplicate.)
@@ -47,3 +49,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Hang-up mini window matches content orientation (landscape apps stay wide); smaller snap-to-corner threshold (0.42); freer resize 20-95%; drag resize-bar to move freeform; whole-box move in passive mode.
 - 2026-11-15: Bar is move-only; separate bottom-right resize button; close+resize auto-hide after 3s, reappear when bar is touched.
 - 2026-11-15 ~18:20 PST session start: Cloned repo (shallow) to /tmp, sanitized remote URL (no token), inspected latest commit b363f9a ("Separate move bar from resize; auto-hide chrome"). Restored context from context.md + todo.md. Ready to assist on next task.
+- 2026-11-15 ~18:30 PST: Added freeform Back button (top-left chrome, injects KEYCODE_BACK into virtual display). Clamped drag so freeform stays fully on-screen. System Home/Recent still only affect fullscreen (desired). System Back still goes to focused fullscreen app until accessibility routing is implemented.

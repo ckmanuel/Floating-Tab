@@ -524,6 +524,11 @@ class FreeformView(
         binding.bottomBar.middleView.setOnTouchListener(this@FreeformView)
         binding.bottomBar.sideView.setOnTouchListener(this@FreeformView)
         // Close (top-right) + resize (bottom-right); auto-hide after 3s of idle
+        binding.backButton.setOnClickListener {
+            if (!isDestroy) {
+                performBackKey()
+            }
+        }
         binding.closeButton.setOnClickListener {
             if (!isDestroy) {
                 destroy()
@@ -1131,10 +1136,13 @@ class FreeformView(
         if (isDestroy || isFloating) return
         controlsVisible = true
         try {
+            binding.backButton.animate().cancel()
             binding.closeButton.animate().cancel()
             binding.resizeButton.animate().cancel()
+            binding.backButton.visibility = View.VISIBLE
             binding.closeButton.visibility = View.VISIBLE
             binding.resizeButton.visibility = View.VISIBLE
+            binding.backButton.alpha = 1f
             binding.closeButton.alpha = 1f
             binding.resizeButton.alpha = 1f
         } catch (_: Exception) {
@@ -1146,6 +1154,9 @@ class FreeformView(
         if (isDestroy || isFloating) return
         controlsVisible = false
         try {
+            binding.backButton.animate().alpha(0f).setDuration(200).withEndAction {
+                if (!controlsVisible) binding.backButton.visibility = View.GONE
+            }.start()
             binding.closeButton.animate().alpha(0f).setDuration(200).withEndAction {
                 if (!controlsVisible) binding.closeButton.visibility = View.GONE
             }.start()
@@ -1163,13 +1174,19 @@ class FreeformView(
         }
     }
 
-    /** Move the freeform window by a delta (used while dragging the move bar). */
+    /** Move the freeform window by a delta (used while dragging the move bar).
+     *  Clamps so the freeform stays fully within the physical display. */
     private fun moveFreeformBy(dx: Float, dy: Float) {
         if (isFloating || isDestroy) return
         try {
+            val newX = windowLayoutParams.x + dx.roundToInt()
+            val newY = windowLayoutParams.y + dy.roundToInt()
+            // Keep the entire freeform on-screen (TOP|START gravity offsets)
+            val maxX = (realScreenWidth - windowLayoutParams.width).coerceAtLeast(0)
+            val maxY = (realScreenHeight - windowLayoutParams.height).coerceAtLeast(0)
             windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                x += dx.roundToInt()
-                y += dy.roundToInt()
+                x = newX.coerceIn(0, maxX)
+                y = newY.coerceIn(0, maxY)
             })
         } catch (_: Exception) {
         }

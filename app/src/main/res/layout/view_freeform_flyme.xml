@@ -73,7 +73,23 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent" />
 
-        <!-- Close (top-right) and resize (bottom-right); auto-hide after idle -->
+        <!-- Back (top-left), Close (top-right), resize (bottom-right); auto-hide after idle -->
+        <ImageButton
+            android:id="@+id/backButton"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/close_button_bg"
+            android:contentDescription="@string/guide_back"
+            android:padding="6dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_back"
+            android:elevation="8dp"
+            android:visibility="visible"
+            app:layout_constraintTop_toTopOf="@id/cardRoot"
+            app:layout_constraintStart_toStartOf="@id/cardRoot" />
+
         <ImageButton
             android:id="@+id/closeButton"
             android:layout_width="36dp"
