@@ -414,13 +414,14 @@ class FreeformView(
         val previous = virtualDisplayRotation
         applyInitialAppOrientation()
 
-        val baseShort = min(realScreenHeight, realScreenWidth)
+        val baseShort = min(realScreenHeight, realScreenWidth).coerceAtLeast(1)
+        val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
         if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-            freeformScreenWidth = (baseShort / config.widthHeightRatio).roundToInt()
-            freeformScreenHeight = (freeformScreenWidth * config.widthHeightRatio).roundToInt()
+            freeformScreenWidth = (baseShort / ratio).roundToInt().coerceAtLeast(48)
+            freeformScreenHeight = (freeformScreenWidth * ratio).roundToInt().coerceAtLeast(48)
         } else {
-            freeformScreenHeight = (baseShort / config.widthHeightRatio).roundToInt()
-            freeformScreenWidth = (freeformScreenHeight * config.widthHeightRatio).roundToInt()
+            freeformScreenHeight = (baseShort / ratio).roundToInt().coerceAtLeast(48)
+            freeformScreenWidth = (freeformScreenHeight * ratio).roundToInt().coerceAtLeast(48)
         }
         initFloatViewSize()
 
@@ -430,29 +431,46 @@ class FreeformView(
         }
 
         if (isDestroy) return
+        if (!::binding.isInitialized) return
 
-        // Already visible: apply layout for the new orientation immediately
-        if (::binding.isInitialized) {
-            if (previous != virtualDisplayRotation && !isFloating) {
-                onFreeFormRotationChanged()
-            } else if (!isFloating) {
-                refreshFreeformSize()
-                resetScale()
-                runCatching {
-                    windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                        width = freeformWidth
-                        height = freeformHeight
-                    })
-                }
-            } else {
-                // Hang-up: keep mini size in sync; full layout applies on restore
-                runCatching {
-                    windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                        width = hangUpViewWidth
-                        height = hangUpViewHeight
-                    })
-                }
+        // Window may not be attached yet (showWindow not called) — only update live layout if attached.
+        // Calling updateViewLayout on a detached view crashes the freeform process.
+        val attached = try {
+            binding.root.isAttachedToWindow
+        } catch (_: Exception) {
+            false
+        }
+        if (!attached) return
+
+        if (previous != virtualDisplayRotation && !isFloating) {
+            onFreeFormRotationChanged()
+        } else if (!isFloating) {
+            refreshFreeformSize()
+            resetScale()
+            runCatching {
+                windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                    width = freeformWidth.coerceAtLeast(48)
+                    height = freeformHeight.coerceAtLeast(48)
+                })
             }
+        } else {
+            // Hang-up: keep mini size in sync; full layout applies on restore
+            runCatching {
+                windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                    width = hangUpViewWidth.coerceAtLeast(48)
+                    height = hangUpViewHeight.coerceAtLeast(48)
+                })
+            }
+        }
+    }
+
+    /** True when the freeform overlay is currently attached to the window manager. */
+    fun isWindowShowing(): Boolean {
+        if (isDestroy || !::binding.isInitialized) return false
+        return try {
+            binding.root.isAttachedToWindow
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -833,8 +851,8 @@ class FreeformView(
         // Window bounds = visible freeform size so touch region matches what you see
         refreshFreeformSize()
         windowLayoutParams.apply {
-            width = freeformWidth
-            height = freeformHeight
+            width = freeformWidth.coerceAtLeast(48)
+            height = freeformHeight.coerceAtLeast(48)
             x = 0
             y = 0
         }
@@ -855,6 +873,20 @@ class FreeformView(
             flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                     WindowManager.LayoutParams.FLAG_DIM_BEHIND
+        }
+
+        // Already showing (e.g. switching apps without destroy): update layout only.
+        // Re-addView fails and the failure path could destroy the freeform.
+        if (binding.root.isAttachedToWindow) {
+            runCatching {
+                windowManager.updateViewLayout(binding.root, windowLayoutParams)
+                if (backgroundView.isAttachedToWindow) {
+                    windowManager.updateViewLayout(backgroundView, backgroundViewLayoutParams)
+                }
+            }
+            initFloatBar()
+            showWindowControls()
+            return
         }
 
         runCatching {
@@ -935,30 +967,35 @@ class FreeformView(
 
         // Recalculate virtual-display size from a stable base that matches current device orientation.
         // Layer 2 only: content orientation follows the app; outer window stays driven by system orientation.
-        val baseShort = min(realScreenHeight, realScreenWidth)
-        val baseLong = max(realScreenHeight, realScreenWidth)
+        val baseShort = min(realScreenHeight, realScreenWidth).coerceAtLeast(1)
+        val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
         if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_PORTRAIT) {
-            freeformScreenHeight = (baseShort / config.widthHeightRatio).roundToInt()
-            freeformScreenWidth = (freeformScreenHeight * config.widthHeightRatio).roundToInt()
+            freeformScreenHeight = (baseShort / ratio).roundToInt().coerceAtLeast(48)
+            freeformScreenWidth = (freeformScreenHeight * ratio).roundToInt().coerceAtLeast(48)
         } else {
-            freeformScreenWidth = (baseShort / config.widthHeightRatio).roundToInt()
-            freeformScreenHeight = (freeformScreenWidth * config.widthHeightRatio).roundToInt()
+            freeformScreenWidth = (baseShort / ratio).roundToInt().coerceAtLeast(48)
+            freeformScreenHeight = (freeformScreenWidth * ratio).roundToInt().coerceAtLeast(48)
         }
 
         initFloatViewSize()
         refreshFreeformSize()
         resetScale()
         resizeVirtualDisplay()
-        binding.freeformRoot.scaleX = 1f
-        binding.freeformRoot.scaleY = 1f
-        mScaleX = 1f
-        mScaleY = 1f
-        windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-            width = freeformWidth
-            height = freeformHeight
-            x = 0
-            y = 0
-        })
+        if (!::binding.isInitialized) return
+        runCatching {
+            binding.freeformRoot.scaleX = 1f
+            binding.freeformRoot.scaleY = 1f
+            mScaleX = 1f
+            mScaleY = 1f
+            if (binding.root.isAttachedToWindow) {
+                windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                    width = freeformWidth.coerceAtLeast(48)
+                    height = freeformHeight.coerceAtLeast(48)
+                    x = 0
+                    y = 0
+                })
+            }
+        }
     }
 
     private fun onScreenOrientationChanged() {

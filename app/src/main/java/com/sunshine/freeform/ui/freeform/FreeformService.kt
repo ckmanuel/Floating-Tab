@@ -150,6 +150,7 @@ class FreeformService: Service(), ScreenListener.ScreenStateListener {
         if (mFreeformView.isFloating || mFreeformView.isHidden) {
             mFreeformView.moveToFirst()
         } else {
+            // showWindow() is safe if already attached (updates layout only)
             mFreeformView.showWindow()
         }
     }
