@@ -391,12 +391,68 @@ class FreeformView(
      * virtual display even if the physical phone is still portrait.
      */
     private fun applyInitialAppOrientation() {
-        val cn = config.componentName ?: return
+        val cn = config.componentName
+        if (cn == null) {
+            virtualDisplayRotation = VIRTUAL_DISPLAY_ROTATION_PORTRAIT
+            return
+        }
         try {
             val ai = context.packageManager.getActivityInfo(cn, 0)
             virtualDisplayRotation = orientationToVirtualRotation(ai.screenOrientation)
         } catch (e: Exception) {
-            // Keep default portrait virtual display
+            // Default to portrait when the activity cannot be resolved
+            virtualDisplayRotation = VIRTUAL_DISPLAY_ROTATION_PORTRAIT
+        }
+    }
+
+    /**
+     * Called whenever a new app is launched into this freeform session.
+     * Re-reads the activity's native orientation so alternating portrait/landscape
+     * apps do not keep the previous virtual-display orientation.
+     */
+    fun refreshForNewApp() {
+        val previous = virtualDisplayRotation
+        applyInitialAppOrientation()
+
+        val baseShort = min(realScreenHeight, realScreenWidth)
+        if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+            freeformScreenWidth = (baseShort / config.widthHeightRatio).roundToInt()
+            freeformScreenHeight = (freeformScreenWidth * config.widthHeightRatio).roundToInt()
+        } else {
+            freeformScreenHeight = (baseShort / config.widthHeightRatio).roundToInt()
+            freeformScreenWidth = (freeformScreenHeight * config.widthHeightRatio).roundToInt()
+        }
+        initFloatViewSize()
+
+        // Always resize the virtual display to the new content orientation before frames arrive
+        runCatching {
+            virtualDisplay.resize(freeformScreenWidth, freeformScreenHeight, config.freeformDpi)
+        }
+
+        if (isDestroy) return
+
+        // Already visible: apply layout for the new orientation immediately
+        if (::binding.isInitialized) {
+            if (previous != virtualDisplayRotation && !isFloating) {
+                onFreeFormRotationChanged()
+            } else if (!isFloating) {
+                refreshFreeformSize()
+                resetScale()
+                runCatching {
+                    windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                        width = freeformWidth
+                        height = freeformHeight
+                    })
+                }
+            } else {
+                // Hang-up: keep mini size in sync; full layout applies on restore
+                runCatching {
+                    windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                        width = hangUpViewWidth
+                        height = hangUpViewHeight
+                    })
+                }
+            }
         }
     }
 
@@ -441,20 +497,23 @@ class FreeformView(
             hangUpViewWidth = w.roundToInt().coerceAtLeast(96)
             hangUpViewHeight = h.roundToInt().coerceAtLeast(56)
         } else {
-            // Tall mini window (content is portrait) — compact corner pill
-            val base = shortSide * floatFrac * 0.85f
-            var w = base.coerceAtMost(screenW * 0.42f)
+            // Tall mini window (content is portrait) — larger, readable corner pill
+            val portFrac = (floatFrac * 1.30f).coerceIn(0.28f, 0.50f)
+            var w = (shortSide * portFrac).coerceAtMost(screenW * 0.48f)
             var h = w / ratio
-            if (h > screenH * 0.50f) {
-                h = screenH * 0.42f
+            if (h > screenH * 0.55f) {
+                h = screenH * 0.50f
                 w = h * ratio
             }
-            if (w > screenW * 0.50f) {
-                w = screenW * 0.40f
+            if (w > screenW * 0.52f) {
+                w = screenW * 0.45f
                 h = w / ratio
             }
-            hangUpViewWidth = w.roundToInt().coerceAtLeast(48)
-            hangUpViewHeight = h.roundToInt().coerceAtLeast(48)
+            // Floor so portrait hang-up stays usable on tall phones
+            w = w.coerceAtLeast(shortSide * 0.28f)
+            h = (w / ratio).coerceAtMost(screenH * 0.55f)
+            hangUpViewWidth = w.roundToInt().coerceAtLeast(72)
+            hangUpViewHeight = h.roundToInt().coerceAtLeast(96)
         }
     }
 
@@ -1734,12 +1793,7 @@ class FreeformView(
                             windowLayoutParams.y,
                         )
 
-                        if (nowY <= (realScreenHeight * 0.1f)) {
-                            destroy()
-                            isMoved = false
-                            return true
-                        }
-
+                        // Top and bottom edges both bounce back — no destroy on upper edge.
                         hangUpPosition[0] = windowCoordinate[0] <= 0
                         hangUpPosition[1] = windowCoordinate[1] <= 0
 
@@ -1753,12 +1807,12 @@ class FreeformView(
                             hangUpViewHeight,
                         )[1]
 
-                        // min Y
+                        // min Y (top edge bounce)
                         if (nowY < (realScreenHeight * 0.1f)) {
                             location[1] = (hangUpViewHeight - realScreenHeight + screenPaddingY) / 2
                         }
 
-                        // max Y
+                        // max Y (bottom edge bounce)
                         if (nowY > (realScreenHeight - (realScreenHeight * 0.1f))) {
                             location[1] = (realScreenHeight - hangUpViewHeight - screenPaddingY) / 2
                         }

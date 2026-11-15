@@ -104,6 +104,9 @@ class FreeformService: Service(), ScreenListener.ScreenStateListener {
                 mIntent = intent.getParcelableExtra(Intent.EXTRA_INTENT)
                 mComponentName = intent.getParcelableExtra(Intent.EXTRA_COMPONENT_NAME)
                 mFreeformView.config = mConfig
+                // Re-detect this activity's native orientation so alternating
+                // portrait/landscape apps do not keep the previous display mode.
+                mFreeformView.refreshForNewApp()
                 if (startIntent() < 0) {
                     return START_NOT_STICKY
                 }
