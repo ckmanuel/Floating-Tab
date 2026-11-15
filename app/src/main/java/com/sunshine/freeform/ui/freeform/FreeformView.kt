@@ -1177,31 +1177,43 @@ class FreeformView(
         }
     }
 
+    /** Live oriented display size (avoids realScreenWidth/Height rotation-swap lag). */
+    private fun currentScreenSize(): Pair<Int, Int> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val rect = windowManager.currentWindowMetrics.bounds
+            rect.width() to rect.height()
+        } else {
+            val dm = context.resources.displayMetrics
+            dm.widthPixels to dm.heightPixels
+        }
+    }
+
+    /**
+     * Clamp center-offset (x, y) so a window of size (w, h) stays fully on-screen.
+     * Gravity.CENTER: 0,0 = screen center; limits are ±(screen - size) / 2.
+     */
+    private fun clampCenterOnScreen(x: Int, y: Int, w: Int, h: Int): IntArray {
+        val (screenW, screenH) = currentScreenSize()
+        val maxX = ((screenW - w) / 2).coerceAtLeast(0)
+        val maxY = ((screenH - h) / 2).coerceAtLeast(0)
+        return intArrayOf(x.coerceIn(-maxX, maxX), y.coerceIn(-maxY, maxY))
+    }
+
     /** Move the freeform window by a delta (used while dragging the move bar).
      *  Clamps so the freeform stays fully within the physical display.
      *  x/y are center-offsets (Gravity.CENTER): 0,0 = screen center. */
     private fun moveFreeformBy(dx: Float, dy: Float) {
         if (isFloating || isDestroy) return
         try {
-            val w = windowLayoutParams.width
-            val h = windowLayoutParams.height
-            // Live oriented bounds — avoid realScreenWidth/Height rotation-swap lag
-            val (screenW, screenH) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val rect = windowManager.currentWindowMetrics.bounds
-                rect.width() to rect.height()
-            } else {
-                val dm = context.resources.displayMetrics
-                dm.widthPixels to dm.heightPixels
-            }
-            // With Gravity.CENTER, keep the whole window on-screen:
-            //   |x| <= (screenW - w) / 2,  |y| <= (screenH - h) / 2
-            val maxX = ((screenW - w) / 2).coerceAtLeast(0)
-            val maxY = ((screenH - h) / 2).coerceAtLeast(0)
-            val newX = (windowLayoutParams.x + dx.roundToInt()).coerceIn(-maxX, maxX)
-            val newY = (windowLayoutParams.y + dy.roundToInt()).coerceIn(-maxY, maxY)
+            val clamped = clampCenterOnScreen(
+                windowLayoutParams.x + dx.roundToInt(),
+                windowLayoutParams.y + dy.roundToInt(),
+                windowLayoutParams.width,
+                windowLayoutParams.height,
+            )
             windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                x = newX
-                y = newY
+                x = clamped[0]
+                y = clamped[1]
             })
         } catch (_: Exception) {
         }
@@ -1684,9 +1696,16 @@ class FreeformView(
                     if (Math.abs(movedX) > minlong || Math.abs(movedY) > minlong) {
                         isMoved = true
 
+                        // Keep hang-up mini window fully on-screen (same center-gravity clamp)
+                        val clamped = clampCenterOnScreen(
+                            windowLayoutParams.x + movedX.toInt(),
+                            windowLayoutParams.y + movedY.toInt(),
+                            windowLayoutParams.width,
+                            windowLayoutParams.height,
+                        )
                         windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                            x += movedX.toInt()
-                            y += movedY.toInt()
+                            x = clamped[0]
+                            y = clamped[1]
                         })
 
                         moveStartX = event.rawX
@@ -1714,7 +1733,13 @@ class FreeformView(
 
                         val location = genFloatViewLocation()
 
-                        location[1] = windowLayoutParams.y
+                        // Keep final hang-up Y on-screen (X is snapped to left/right edge)
+                        location[1] = clampCenterOnScreen(
+                            location[0],
+                            windowLayoutParams.y,
+                            hangUpViewWidth,
+                            hangUpViewHeight,
+                        )[1]
 
                         // min Y
                         if (nowY < (realScreenHeight * 0.1f)) {
