@@ -74,3 +74,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Released alpha-29-a93ee20 (touch scale + clean landscape close/reopen). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-29-a93ee20
 - 2026-11-15: Fix landscape first-open black + second-open oversized. Root cause of oversized was moveRootTaskToDisplay(DEFAULT) on close (fullscreen task reused). Now: BACK + am task remove on close; startIntent deferred until TextureView surface is bound; hard-clamp freeformScreen/window sizes; FLAG_ACTIVITY_NEW_TASK on freeform launches.
 - 2026-11-15: Released alpha-30-6fda2ab (landscape black/oversized fix). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-30-6fda2ab
+- 2026-11-15: Fix mixed chrome buttons. Close no longer injects BACK (that made X==Back). Buttons consume their own touches + bringToFront; larger hit targets. Fullscreen button remains removed (oversize snaps back to freeform).

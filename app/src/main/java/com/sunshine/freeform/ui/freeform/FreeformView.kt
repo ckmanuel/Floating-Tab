@@ -681,17 +681,42 @@ class FreeformView(
         binding.root.setOnTouchListener(this)
         binding.bottomBar.middleView.setOnTouchListener(this@FreeformView)
         binding.bottomBar.sideView.setOnTouchListener(this@FreeformView)
-        // Close (top-right) + resize (bottom-right); auto-hide after 3s of idle
-        binding.backButton.setOnClickListener {
-            if (!isDestroy) {
-                performBackKey()
+        // Chrome roles (must not mix):
+        //   back   → KEYCODE_BACK into the virtual display only
+        //   close  → dismiss freeform only (never inject BACK)
+        //   resize → drag to resize (hang-up only when shrunk far enough)
+        // Consume touches so root/TextureView listeners cannot steal them.
+        fun wireChromeTap(btn: android.widget.ImageButton, onTap: () -> Unit) {
+            btn.isClickable = true
+            btn.isFocusable = true
+            btn.setOnTouchListener { v, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        showWindowControls()
+                        v.isPressed = true
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        v.isPressed = false
+                        val inside = event.x >= 0 && event.y >= 0 &&
+                            event.x < v.width && event.y < v.height
+                        if (inside && !isDestroy) onTap()
+                        scheduleHideWindowControls()
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        v.isPressed = false
+                        true
+                    }
+                    else -> true
+                }
             }
         }
-        binding.closeButton.setOnClickListener {
-            if (!isDestroy) {
-                destroy()
-            }
-        }
+        wireChromeTap(binding.backButton) { performBackKey() }
+        wireChromeTap(binding.closeButton) { destroy() }
+
+        binding.resizeButton.isClickable = true
+        binding.resizeButton.isFocusable = true
         binding.resizeButton.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -705,7 +730,6 @@ class FreeformView(
                     if (touchId == R.id.resizeButton) {
                         val dx = event.rawX - lastX
                         val dy = event.rawY - lastY
-                        // Corner resize: both axes (keep aspect via handleToFloatScale primary axis)
                         if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) {
                             handleToFloatScale(dx, 0f)
                         } else {
@@ -724,9 +748,12 @@ class FreeformView(
                     scheduleHideWindowControls()
                     true
                 }
-                else -> false
+                else -> true
             }
         }
+        binding.backButton.bringToFront()
+        binding.closeButton.bringToFront()
+        binding.resizeButton.bringToFront()
         showWindowControls()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1364,6 +1391,9 @@ class FreeformView(
             binding.closeButton.scaleY = 1f
             binding.resizeButton.scaleX = 1f
             binding.resizeButton.scaleY = 1f
+            binding.backButton.bringToFront()
+            binding.closeButton.bringToFront()
+            binding.resizeButton.bringToFront()
         } catch (_: Exception) {
         }
         scheduleHideWindowControls()
@@ -2336,28 +2366,22 @@ class FreeformView(
         isFloating = false
         showWindowControls()
 
-        // Close freeform tasks without moving them to the default display.
-        // Moving to DEFAULT_DISPLAY left a fullscreen-sized task that the next
-        // freeform launch reused → black first open / enormous freeform size.
-        // Instead: BACK to finish, then best-effort am task remove, then drop surface.
+        // Dismiss freeform without injecting BACK.
+        // BACK is only for the Back chrome button; injecting it on Close made
+        // X and Back feel identical (mixed-up button behavior).
         val ids = taskList.toList()
         taskList.clear()
         surfaceReadyCallback = null
 
-        runCatching {
-            if (virtualDisplay.surface != null) {
-                performBackKey()
-                SystemClock.sleep(120)
-            }
-        }
-
-        // Best-effort remove residual tasks so the next launch is a clean start
         for (tId in ids) {
             runCatching {
                 com.sunshine.freeform.utils.ShellUtils.execCommandWithShizuku(
                     "am task remove $tId", false
                 )
             }
+        }
+        if (ids.isNotEmpty()) {
+            SystemClock.sleep(60)
         }
 
         runCatching {
