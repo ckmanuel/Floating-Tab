@@ -494,13 +494,13 @@ class FreeformView(
         binding.root.setOnTouchListener(this)
         binding.bottomBar.middleView.setOnTouchListener(this@FreeformView)
         binding.bottomBar.sideView.setOnTouchListener(this@FreeformView)
-        // Persistent close control on the top-right of the freeform card
-        binding.topBar.closeButton.setOnClickListener {
+        // Always-visible close button (top-right of card), shown together with the resize bar
+        binding.closeButton.setOnClickListener {
             if (!isDestroy) {
                 destroy()
             }
         }
-        binding.topBar.closeButton.visibility = View.VISIBLE
+        binding.closeButton.visibility = View.VISIBLE
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             binding.textureView.setOnTouchListener(touchListener)

@@ -16,10 +16,8 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - **v1.0.0 First Stable Release** published (2026-11-15) based on commit 7ec7ca6 / former alpha-9.
   - Download: https://github.com/ckmanuel/Floating-Tab/releases/tag/v1.0.0
   - APK: Floating-Tab-1.0.0.apk (signed debug)
-- Highlights in 1.0.0:
-  - Landscape-native apps open with correct orientation virtual display
-  - Freeform outer size always clamped to physical screen bounds (aspect preserved)
-  - Close button on top-right of freeform card
+- Post-1.0.0 work in progress on flyme branch:
+  - Fixed missing X/close button: it is now an independent always-visible control on the top-right of the freeform card (no longer inside the zero-height topBar). Shows simultaneously with the bottom resize bar.
 - Known open item from todo.md: Implement fluid gestures through accessibility so the back key can be listened to.
 
 ## Memory Entries
@@ -38,3 +36,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 ## Transcript (append, redact secrets)
 - 2026-11-15 session start: Cloned repo, cleaned remote URL of token, inspected latest commit (7ec7ca6). Created initial context.md.
 - 2026-11-15: Created tag v1.0.0 + GitHub Release "1.0.0 – First Stable Release" (non-prerelease). Uploaded Floating-Tab-1.0.0.apk (same binary as alpha-9). Release URL: https://github.com/ckmanuel/Floating-Tab/releases/tag/v1.0.0
+- 2026-11-15: Fixed X/close button. Root cause: top_bar_height=0dp so the button inside topBar was never visible. Added independent closeButton overlaid top-right of cardRoot in view_freeform_flyme.xml + circular background drawable. Wired in FreeformView.kt. Removed dead closeButton from view_bar.xml.
