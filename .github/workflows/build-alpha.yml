@@ -10,6 +10,7 @@ permissions:
 
 env:
   ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
 jobs:
   build:
@@ -25,12 +26,24 @@ jobs:
           java-version: 17
           cache: gradle
 
-      - name: Accept Android licenses & install packages
+      - name: Locate sdkmanager and install packages
         run: |
           set -e
-          # Runner already has Android SDK; install what we need for compileSdk 36
-          yes 2>/dev/null | sdkmanager --licenses >/tmp/licenses.log || true
-          sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls -la "$ANDROID_HOME" || true
+          find "$ANDROID_HOME" -name sdkmanager -type f 2>/dev/null | head -5
+          SDKMANAGER=$(find "$ANDROID_HOME" -name sdkmanager -type f 2>/dev/null | head -1)
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager not found, downloading cmdline-tools..."
+            mkdir -p "$ANDROID_HOME/cmdline-tools"
+            curl -fsSL -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q /tmp/cmdtools.zip -d "$ANDROID_HOME/cmdline-tools"
+            mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          echo "Using $SDKMANAGER"
+          yes 2>/dev/null | "$SDKMANAGER" --licenses >/tmp/licenses.log || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;35.0.0" "platform-tools"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           ls "$ANDROID_HOME/platforms" || true
 
