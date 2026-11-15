@@ -16,7 +16,8 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - **v1.0.0 First Stable Release** published (2026-11-15) based on commit 7ec7ca6 / former alpha-9.
   - Download: https://github.com/ckmanuel/Floating-Tab/releases/tag/v1.0.0
   - APK: Floating-Tab-1.0.0.apk (signed debug)
-- Post-1.0.0 work on flyme branch:
+- **v1.1 base** (current flyme HEAD ~ alpha-28): Restored stable freeform from renumbered alpha-25 (424f9ed). **Fullscreen chrome / goFullscreen path fully removed** (it was blanking landscape freeforms). Oversize gesture now snaps back to freeform size.
+- Post-1.0.0 freeform improvements retained:
   - Close button fixed (independent top-right control).
   - Freeform sizing: clamp to physical screen, preserve orientation/aspect, defaults 90-95%.
   - Move bar is move-only; separate bottom-right resize grip.
@@ -73,3 +74,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - Why two alphas per change: every push to flyme triggers Build Alpha. A follow-up "context: record alpha-N" commit was a second push → second alpha. Workflow now paths-ignore *.md so memory-only commits no longer publish builds.
 - 2026-11-15: Cleaned inflated alphas 11–39. Deleted context-only + broken builds. Renumbered real builds to alpha-11 … alpha-26 (alpha-26 = v1.1.0). Workflow now uses .alpha-number sequential counter (next=27); ignores .alpha-number-only pushes.
 - 2026-11-15: README rewritten for Floating-Tab (ckmanuel). App name Floating-Tab; privacy notice no longer credits KindBrave; home links point to this repo. Preparing v1.1.0 re-release with these branding fixes.
+- 2026-11-15 (evening) session start: Cloned repo to /tmp (FUSE artifacts mount had I/O issues), cleaned remote URL of token, confirmed latest commit 5d708a5 (chore: bump alpha number to 28 [skip ci]). Previous meaningful: d7fde01 fix stray brace; 63eafdf v1.1 base (remove fullscreen feature). Updated Current Status for removed fullscreen. Ready for next task.
