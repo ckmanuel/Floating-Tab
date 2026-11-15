@@ -672,20 +672,22 @@ class FreeformView(
 
         setWindowNoUpdateAnimation()
 
+        // Window bounds = visible freeform size so touch region matches what you see
+        refreshFreeformSize()
         windowLayoutParams.apply {
-            width = rootWidth
-            height = rootHeight
+            width = freeformWidth
+            height = freeformHeight
+            x = 0
+            y = 0
         }
+        // No outer scale — size is already correct
+        binding.freeformRoot.scaleX = 1f
+        binding.freeformRoot.scaleY = 1f
+        mScaleX = 1f
+        mScaleY = 1f
 
-        //横屏移动到屏幕左侧显示小窗
-        if (screenRotation == Surface.ROTATION_90 || screenRotation == Surface.ROTATION_270) {
-            windowLayoutParams.apply {
-                x = genCenterLocation()[0]
-                //往上移动一些
-                y = genCenterLocation()[1]
-            }
-        }
-
+        // Full-screen dim layer must NOT take touches — otherwise the whole screen
+        // is blocked and the user cannot interact with apps behind the freeform.
         backgroundViewLayoutParams.apply {
             dimAmount = config.dimAmount
             format = PixelFormat.RGBA_8888
@@ -693,9 +695,8 @@ class FreeformView(
             width = WindowManager.LayoutParams.MATCH_PARENT
             height = WindowManager.LayoutParams.MATCH_PARENT
             flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_DIM_BEHIND or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_DIM_BEHIND
         }
 
         runCatching {
@@ -790,11 +791,15 @@ class FreeformView(
         refreshFreeformSize()
         resetScale()
         resizeVirtualDisplay()
+        binding.freeformRoot.scaleX = 1f
+        binding.freeformRoot.scaleY = 1f
+        mScaleX = 1f
+        mScaleY = 1f
         windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-            width = rootWidth
-            height = rootHeight
-            x = genCenterLocation()[0]
-            y = genCenterLocation()[1]
+            width = freeformWidth
+            height = freeformHeight
+            x = 0
+            y = 0
         })
     }
 
@@ -815,20 +820,12 @@ class FreeformView(
         } else if (isHidden) {
             moveHiddenViewLocation(location)
         } else {
-            windowLayoutParams.apply {
-                height = rootHeight
-                width = rootWidth
-            }
             (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
                 topMargin = freeformShadow.roundToInt()
                 bottomMargin = barHeight.roundToInt()
                 rightMargin = 0
             }
-            windowLayoutParams.apply {
-                x = genCenterLocation()[0]
-                y = genCenterLocation()[1]
-            }
-            if(!FreeformHelper.screenIsPortrait(screenRotation)) {
+            if (!FreeformHelper.screenIsPortrait(screenRotation)) {
                 binding.apply {
                     (cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
                         topMargin = 0
@@ -837,7 +834,16 @@ class FreeformView(
                     }
                 }
             }
-            resetScale()
+            binding.freeformRoot.scaleX = 1f
+            binding.freeformRoot.scaleY = 1f
+            mScaleX = 1f
+            mScaleY = 1f
+            windowLayoutParams.apply {
+                width = freeformWidth
+                height = freeformHeight
+                x = 0
+                y = 0
+            }
             windowManager.updateViewLayout(binding.root, windowLayoutParams)
         }
     }
@@ -885,33 +891,34 @@ class FreeformView(
     }
 
     private fun refreshFreeformSize() {
-        // Layer 1: outer freeform size follows device orientation + user size prefs.
-        // Layer 2: virtualDisplayRotation follows the app's native orientation.
-        if (FreeformHelper.screenIsPortrait(screenRotation)) {
-            freeformWidth = (rootWidth * config.freeformSize).roundToInt()
-            val contentHeight = (freeformWidth - (freeformShadow * 2)) / config.widthHeightRatio
-            freeformHeight = (contentHeight + cardHeightMargin).roundToInt()
-            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-                // Portrait phone + landscape app: keep a usable width; content is landscape inside VD
-                freeformWidth = (rootWidth * (config.freeformSize + 0.08f).coerceAtMost(0.95f)).roundToInt()
-                freeformHeight = ((freeformWidth - (freeformShadow * 2)) / config.widthHeightRatio + cardHeightMargin).roundToInt()
+        // Uniform freeform geometry:
+        // - Portrait content → fixed 9:16 window sized by freeformSize
+        // - Landscape content → fixed 16:9 window sized by freeformSizeLand
+        // Independent of the chaotic root/scale pairing that made sizes look "junky".
+        val shortSide = min(realScreenWidth, realScreenHeight).toFloat()
+        val longSide = max(realScreenWidth, realScreenHeight).toFloat()
+        val ratio = config.widthHeightRatio.coerceAtLeast(0.4f) // default ~9/16
+
+        if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+            // Landscape content: width > height (16:9-ish)
+            var w = (longSide * config.freeformSizeLand).roundToInt()
+            var h = (w * ratio).roundToInt()
+            if (h > shortSide * 0.9f) {
+                h = (shortSide * 0.85f).roundToInt()
+                w = (h / ratio).roundToInt()
             }
+            freeformWidth = w + cardWidthMargin.roundToInt()
+            freeformHeight = h
         } else {
-            // Device is landscape
-            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-                // Landscape phone + landscape app: use freeformSizeLand of full width (NOT half-width)
-                freeformWidth = (realScreenWidth * config.freeformSizeLand).roundToInt()
-                freeformHeight = ((freeformWidth * config.widthHeightRatio) + cardWidthMargin).roundToInt()
-                if (freeformHeight > realScreenHeight * 0.92f) {
-                    freeformHeight = (realScreenHeight * 0.88f).roundToInt()
-                    freeformWidth = ((freeformHeight - cardWidthMargin) / config.widthHeightRatio).roundToInt()
-                }
-            } else {
-                // Landscape phone + portrait app
-                freeformHeight = (rootHeight * config.freeformSizeLand).roundToInt()
-                freeformHeight += cardHeightMargin.roundToInt()
-                freeformWidth = ((freeformHeight + cardWidthMargin) * config.widthHeightRatio).roundToInt()
+            // Portrait content: height > width (9:16)
+            var w = (shortSide * config.freeformSize).roundToInt()
+            var h = (w / ratio).roundToInt()
+            if (h > longSide * 0.9f) {
+                h = (longSide * 0.85f).roundToInt()
+                w = (h * ratio).roundToInt()
             }
+            freeformWidth = w
+            freeformHeight = h + cardHeightMargin.roundToInt()
         }
     }
 
@@ -921,18 +928,25 @@ class FreeformView(
     }
 
     private fun refreshTouchScale() {
-        scaleX = (rootWidth - cardWidthMargin) / freeformScreenWidth.toFloat()
-        scaleY = (rootHeight - cardHeightMargin) / freeformScreenHeight.toFloat()
+        // Map touches from the visible freeform window into virtual-display coordinates
+        val contentW = (freeformWidth - cardWidthMargin).coerceAtLeast(1f)
+        val contentH = (freeformHeight - cardHeightMargin).coerceAtLeast(1f)
+        scaleX = contentW / freeformScreenWidth.coerceAtLeast(1).toFloat()
+        scaleY = contentH / freeformScreenHeight.coerceAtLeast(1).toFloat()
     }
 
     private fun refreshActionScale() {
-        goFloatScale = (freeformHeight * 0.8f) / rootHeight
-        goFullScale = (freeformHeight * 1.1f) / rootHeight
+        // Thresholds relative to the freeform window itself (scale is now always ~1 in normal mode)
+        goFloatScale = 0.75f
+        goFullScale = 1.15f
     }
 
     private fun resetScale() {
         refreshTouchScale()
-        refreshScale()
+        // Keep visual scale at 1 — window LayoutParams already match freeformWidth/Height.
+        // Fractional mScale was making the freeform look inconsistent and "junky".
+        mScaleX = 1f
+        mScaleY = 1f
         refreshActionScale()
     }
 
