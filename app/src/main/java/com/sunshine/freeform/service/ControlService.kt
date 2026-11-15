@@ -80,49 +80,25 @@ class ControlService : IControlService.Stub() {
     }
 
     /**
-     * Move whatever is on [displayId] (virtual freeform display) onto the default display (0).
-     * Tries several shell forms because output differs across Android versions.
+     * 移动到全屏
      */
     override fun moveStack(displayId: Int): Boolean {
         return try {
-            val list = ShellUtils.execCommand("am stack list", false)
-            val out = ((list.successMsg ?: "") + "\n" + (list.errorMsg ?: ""))
-            val stackIds = linkedSetOf<String>()
-            for (line in out.split('\n')) {
-                if (!Regex("displayId=" + displayId + "(\\D|$)").containsMatchIn(line)) {
-                    continue
-                }
-                val m = Regex("(?:RootTask|Stack|Task)\\s+id=(\\d+)").find(line)
-                    ?: Regex("id=(\\d+)").find(line)
-                if (m != null) {
-                    stackIds.add(m.groupValues[1])
-                }
-            }
-            if (stackIds.isEmpty()) {
-                val legacy = ShellUtils.execCommand(
-                    "am stack list | grep displayId=$displayId",
-                    false
-                ).successMsg
-                if (!legacy.isNullOrBlank()) {
-                    for (part in legacy.trim().split(Regex("\\s+"))) {
-                        if (part.startsWith("id=")) {
-                            val digits = part.removePrefix("id=").filter { it.isDigit() }
-                            if (digits.isNotEmpty()) stackIds.add(digits)
-                        }
-                    }
-                }
-            }
-            var any = false
-            for (sid in stackIds) {
-                if (sid.isEmpty()) continue
-                val r1 = ShellUtils.execCommand("am display move-stack $sid 0", false).result
-                val r2 = ShellUtils.execCommand("am stack move-stack $sid 0", false).result
-                if (r1 == 0 || r2 == 0) any = true
-            }
-            any
+            val stackId: String = ShellUtils.execCommand(
+                "am stack list | grep displayId=$displayId",
+                false
+            ).successMsg!!.split(" ".toRegex()).toTypedArray()[1].replace("id=", "")
+
+            val result = ShellUtils.execCommand(
+                "am display move-stack $stackId 0",
+                false
+            ).result
+
+            result == 0
         } catch (e: Exception) {
             false
         }
+
     }
 
     /**

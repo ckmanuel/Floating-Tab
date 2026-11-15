@@ -69,3 +69,5 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Released alpha-35-424f9ed (landscape/fullscreen crash hardening). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-35-424f9ed
 - 2026-11-15: Fullscreen for landscape apps — unregister task listener first; try ATM + move-stack + am task move-to-display + am start --display 0; ignore onTaskRemoval during promote; longer delay before VD teardown; improved moveStack parsing.
 - 2026-11-15: Released alpha-37-4bb0758 (landscape fullscreen reparent fix). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-37-4bb0758
+- 2026-11-15: Reverted alpha-37/38 fullscreen reparent experiment (killed landscape apps). Restored alpha-35 behavior. Fullscreen chrome button hidden for landscape-native freeforms (portrait+landscape device). Stable release target: v1.1.0.
+- Why two alphas per change: every push to flyme triggers Build Alpha. A follow-up "context: record alpha-N" commit was a second push → second alpha. Workflow now paths-ignore *.md so memory-only commits no longer publish builds.

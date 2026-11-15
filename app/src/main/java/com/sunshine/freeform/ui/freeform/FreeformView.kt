@@ -651,7 +651,8 @@ class FreeformView(
             }
         }
         binding.fullscreenButton.setOnClickListener {
-            if (!isDestroy) {
+            // Landscape-native freeforms must not use fullscreen — it kills those apps.
+            if (!isDestroy && virtualDisplayRotation != VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
                 goFullscreen()
             }
         }
@@ -720,11 +721,8 @@ class FreeformView(
     }
 
     /**
-     * Exit freeform and promote the app to the real full-screen display.
-     *
-     * Landscape apps are sensitive: tearing down the virtual display before the task
-     * is reparented kills them. We always try several move strategies, ignore task-removal
-     * callbacks while promoting, never inject BACK, and only release the VD after a delay.
+     * Exit freeform and move the task to the default display as a normal full-screen app.
+     * Order matters: reparent/relaunch first, skip BACK in destroy, then tear down overlay only.
      */
     private fun goFullscreen() {
         if (isDestroy || goingFullscreen) return
@@ -738,87 +736,54 @@ class FreeformView(
         } catch (_: Exception) {
         }
 
-        // Stop listening so onTaskRemovalStarted cannot race and destroy mid-move
-        runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                activityTaskManager.unregisterTaskStackListener(taskStackListener)
-            }
-        }
-
+        // Snapshot before any async work
         val displayId = virtualDisplay.display.displayId
         val tasks = ArrayList(taskList)
         val cn = config.componentName
-        val userId = config.userId.coerceAtLeast(0)
-        val launchIntent = config.intent
+        val userId = config.userId
 
-        scope.launch(Dispatchers.IO) {
+        scope.launch(Dispatchers.Main) {
             var moved = false
-            val cs = runCatching { com.sunshine.freeform.app.MiFreeform.me.controlService }.getOrNull()
-
-            // 1) Always try ATM move for every known task (do not stop at first failure)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                for (tId in tasks) {
-                    val ok = runCatching {
-                        activityTaskManager.moveRootTaskToDisplay(tId, Display.DEFAULT_DISPLAY)
-                        true
-                    }.getOrDefault(false)
-                    if (ok) moved = true
-                    // Also try shell task move (API varies)
-                    if (cs != null) {
-                        runCatching { cs.execShell("am task move-to-display $tId 0", false) }
-                        runCatching { cs.execShell("cmd activity move-task-to-display $tId 0", false) }
+            try {
+                // 1) Shell move-stack (ControlService)
+                val cs = runCatching { com.sunshine.freeform.app.MiFreeform.me.controlService }.getOrNull()
+                if (cs != null) {
+                    moved = runCatching { cs.moveStack(displayId) }.getOrDefault(false)
+                }
+                // 2) ActivityTaskManager moveRootTaskToDisplay
+                if (!moved && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    for (tId in tasks) {
+                        val ok = runCatching {
+                            activityTaskManager.moveRootTaskToDisplay(tId, Display.DEFAULT_DISPLAY)
+                            true
+                        }.getOrDefault(false)
+                        if (ok) moved = true
                     }
                 }
-            }
-
-            // 2) Shell move-stack for the whole virtual display
-            if (cs != null) {
-                val stackMoved = runCatching { cs.moveStack(displayId) }.getOrDefault(false)
-                if (stackMoved) moved = true
-            }
-
-            // 3) Bring/start activity on display 0 (reorder existing task when possible)
-            if (cn != null && cs != null) {
-                val startCmds = listOf(
-                    "am start --display 0 --user $userId -n ${cn.packageName}/${cn.className}",
-                    "am start --display 0 --user $userId -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n ${cn.packageName}/${cn.className}",
-                )
-                for (cmd in startCmds) {
-                    val ok = runCatching { cs.execShell(cmd, false) }.getOrDefault(false)
-                    if (ok) {
+                // 3) Shell: am start on display 0 (keeps the activity alive)
+                if (!moved && cn != null && cs != null) {
+                    val cmd = "am start -n ${cn.packageName}/${cn.className} --user $userId --display 0"
+                    moved = runCatching { cs.execShell(cmd, false) }.getOrDefault(false)
+                }
+                // 4) Service relaunch on default display
+                if (!moved) {
+                    runCatching {
+                        context.startService(
+                            Intent(context, FreeformService::class.java)
+                                .setAction(FreeformService.ACTION_CALL_INTENT)
+                                .putExtra(FreeformService.EXTRA_DISPLAY_ID, Display.DEFAULT_DISPLAY)
+                        )
                         moved = true
-                        break
                     }
                 }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "goFullscreen move failed", e)
             }
-
-            // 4) Fallback via FreeformService on default display
-            if (!moved) {
-                runCatching {
-                    context.startService(
-                        Intent(context, FreeformService::class.java)
-                            .setAction(FreeformService.ACTION_CALL_INTENT)
-                            .putExtra(FreeformService.EXTRA_DISPLAY_ID, Display.DEFAULT_DISPLAY)
-                            .apply {
-                                if (launchIntent is Intent) {
-                                    putExtra(Intent.EXTRA_INTENT, launchIntent)
-                                }
-                            }
-                    )
-                    moved = true
-                }
-            }
-
-            android.util.Log.i(TAG, "goFullscreen moved=$moved tasks=$tasks displayId=$displayId")
-
-            // Let the system finish reparent + orientation change (landscape apps need more time)
-            kotlinx.coroutines.delay(if (moved) 500 else 200)
-
-            withContext(Dispatchers.Main) {
-                if (!isDestroy) {
-                    // Tear down overlay / VD without BACK (goingFullscreen flag)
-                    destroy()
-                }
+            // Wait longer for landscape apps — orientation change on default display is slower
+            kotlinx.coroutines.delay(if (moved) 350 else 100)
+            if (!isDestroy) {
+                // destroy skips BACK when goingFullscreen
+                destroy()
             }
         }
     }
@@ -1403,11 +1368,14 @@ class FreeformView(
             binding.backButton.visibility = View.VISIBLE
             binding.closeButton.visibility = View.VISIBLE
             binding.resizeButton.visibility = View.VISIBLE
-            binding.fullscreenButton.visibility = View.VISIBLE
+            // Fullscreen is unreliable for landscape-native apps (kills the task).
+            // Hide it whenever the freeform content is landscape — phone portrait or landscape.
+            val landscapeApp = virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
+            binding.fullscreenButton.visibility = if (landscapeApp) View.GONE else View.VISIBLE
             binding.backButton.alpha = 1f
             binding.closeButton.alpha = 1f
             binding.resizeButton.alpha = 1f
-            binding.fullscreenButton.alpha = 1f
+            binding.fullscreenButton.alpha = if (landscapeApp) 0f else 1f
             // Ensure chrome is not left scaled from hang-up restore
             binding.backButton.scaleX = 1f
             binding.backButton.scaleY = 1f
@@ -2528,19 +2496,16 @@ class FreeformView(
         }
 
         override fun onTaskRemoved(taskId: Int) {
-            if (goingFullscreen) return
             taskList.remove(taskId)
         }
 
         override fun onTaskRemovalStarted(taskInfo: ActivityManager.RunningTaskInfo) {
-            // Promoting to fullscreen moves the task off the VD — do not treat as close
-            if (goingFullscreen) return
             if (taskList.contains(taskInfo.taskId)) {
                 taskList.remove(taskInfo.taskId)
                 if (taskList.isEmpty()) {
                     destroyJob = scope.launch {
                         delay(250)
-                        if (!isDestroy && !goingFullscreen) {
+                        if (!isDestroy) {
                             destroy()
                         }
                     }

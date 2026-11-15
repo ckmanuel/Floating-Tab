@@ -4,6 +4,11 @@ on:
   workflow_dispatch:
   push:
     branches: [flyme]
+    # Skip doc/memory-only commits so every feature push does not publish two alphas
+    paths-ignore:
+      - 'context.md'
+      - 'todo.md'
+      - '**.md'
 
 permissions:
   contents: write
