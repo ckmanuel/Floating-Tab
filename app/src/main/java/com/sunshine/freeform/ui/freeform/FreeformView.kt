@@ -480,7 +480,22 @@ class FreeformView(
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE,
             ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE,
             ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE -> VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
-            else -> VIRTUAL_DISPLAY_ROTATION_PORTRAIT
+
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT,
+            ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT,
+            ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT,
+            ActivityInfo.SCREEN_ORIENTATION_NOSENSOR -> VIRTUAL_DISPLAY_ROTATION_PORTRAIT
+
+            // SENSOR / FULL_SENSOR / USER / UNSPECIFIED / FULL_USER:
+            // follow the physical device so landscape-device + sensor apps open landscape.
+            else -> {
+                if (FreeformHelper.screenIsPortrait(screenRotation)) {
+                    VIRTUAL_DISPLAY_ROTATION_PORTRAIT
+                } else {
+                    VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
+                }
+            }
         }
     }
 
@@ -616,6 +631,11 @@ class FreeformView(
                 destroy()
             }
         }
+        binding.fullscreenButton.setOnClickListener {
+            if (!isDestroy) {
+                goFullscreen()
+            }
+        }
         binding.resizeButton.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -678,6 +698,35 @@ class FreeformView(
 
         binding.freeformRoot.alpha = 1f
         binding.textureView.alpha = 0f
+    }
+
+    /**
+     * Exit freeform and move the task to the default display as a normal full-screen app.
+     * The activity keeps its native orientation (system handles it on the real display).
+     */
+    private fun goFullscreen() {
+        if (isDestroy) return
+        try {
+            // Hide chrome immediately
+            controlHandler.removeCallbacks(hideControlsRunnable)
+            binding.backButton.visibility = View.GONE
+            binding.closeButton.visibility = View.GONE
+            binding.resizeButton.visibility = View.GONE
+            binding.fullscreenButton.visibility = View.GONE
+        } catch (_: Exception) {
+        }
+
+        // Move the freeform task onto the real screen first
+        context.startService(
+            Intent(context, FreeformService::class.java)
+                .setAction(FreeformService.ACTION_CALL_INTENT)
+                .putExtra(FreeformService.EXTRA_DISPLAY_ID, defaultDisplay.displayId)
+        )
+        // Small delay so the activity can settle on the default display before teardown
+        scope.launch {
+            kotlinx.coroutines.delay(150)
+            if (!isDestroy) destroy()
+        }
     }
 
     private fun performBackKey() {
@@ -1140,8 +1189,10 @@ class FreeformView(
             .coerceIn(48, screenH.roundToInt())
     }
     private fun refreshScale() {
-        mScaleX = freeformWidth / rootWidth.toFloat()
-        mScaleY = freeformHeight / rootHeight.toFloat()
+        // Keep visual scale at 1 — freeform size is applied via LayoutParams.
+        // Writing freeform/root into mScaleX would shrink freeformRoot (and chrome buttons).
+        mScaleX = 1f
+        mScaleY = 1f
     }
 
     private fun refreshTouchScale() {
@@ -1243,12 +1294,24 @@ class FreeformView(
             binding.backButton.animate().cancel()
             binding.closeButton.animate().cancel()
             binding.resizeButton.animate().cancel()
+            binding.fullscreenButton.animate().cancel()
             binding.backButton.visibility = View.VISIBLE
             binding.closeButton.visibility = View.VISIBLE
             binding.resizeButton.visibility = View.VISIBLE
+            binding.fullscreenButton.visibility = View.VISIBLE
             binding.backButton.alpha = 1f
             binding.closeButton.alpha = 1f
             binding.resizeButton.alpha = 1f
+            binding.fullscreenButton.alpha = 1f
+            // Ensure chrome is not left scaled from hang-up restore
+            binding.backButton.scaleX = 1f
+            binding.backButton.scaleY = 1f
+            binding.closeButton.scaleX = 1f
+            binding.closeButton.scaleY = 1f
+            binding.resizeButton.scaleX = 1f
+            binding.resizeButton.scaleY = 1f
+            binding.fullscreenButton.scaleX = 1f
+            binding.fullscreenButton.scaleY = 1f
         } catch (_: Exception) {
         }
         scheduleHideWindowControls()
@@ -1266,6 +1329,9 @@ class FreeformView(
             }.start()
             binding.resizeButton.animate().alpha(0f).setDuration(200).withEndAction {
                 if (!controlsVisible) binding.resizeButton.visibility = View.GONE
+            }.start()
+            binding.fullscreenButton.animate().alpha(0f).setDuration(200).withEndAction {
+                if (!controlsVisible) binding.fullscreenButton.visibility = View.GONE
             }.start()
         } catch (_: Exception) {
         }
@@ -1350,11 +1416,39 @@ class FreeformView(
     }
 
     private fun getRestoreFreeformScale(): FloatArray {
+        // Modern path keeps visual scale at 1 and resizes LayoutParams to freeform size.
+        // Returning fractional freeform/root scales squeezed the chrome buttons after hang-up.
         refreshFreeformSize()
-        return floatArrayOf(
-            freeformWidth / rootWidth.toFloat(),
-            freeformHeight / rootHeight.toFloat(),
-        )
+        return floatArrayOf(1f, 1f)
+    }
+
+    /** Finish hang-up → freeform restore with full-size window and unscaled chrome. */
+    private fun finishRestoreFromHangUp() {
+        isFloating = false
+        isAnimating = false
+        refreshFreeformSize()
+        mScaleX = 1f
+        mScaleY = 1f
+        runCatching {
+            binding.freeformRoot.scaleX = 1f
+            binding.freeformRoot.scaleY = 1f
+            binding.cardRoot.radius = context.resources.getDimension(R.dimen.card_corner_radius)
+            if (binding.root.isAttachedToWindow) {
+                windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                    width = freeformWidth.coerceAtLeast(48)
+                    height = freeformHeight.coerceAtLeast(48)
+                    x = 0
+                    y = 0
+                })
+            }
+        }
+        refreshTouchScale()
+        refreshActionScale()
+        showWindowControls()
+        if (pendingOrientationChange) {
+            pendingOrientationChange = false
+            onFreeFormRotationChanged()
+        }
     }
 
     private fun cardViewMarginAnim(topStartMargin: Int, bottomStartMargin: Int, rightStartMargin: Int, topEndMargin: Int, bottomEndMargin: Int, rightEndMargin: Int): Animator {
@@ -1600,8 +1694,10 @@ class FreeformView(
                                         isFloating = true
                                         controlHandler.removeCallbacks(hideControlsRunnable)
                                         try {
+                                            binding.backButton.visibility = View.GONE
                                             binding.closeButton.visibility = View.GONE
                                             binding.resizeButton.visibility = View.GONE
+                                            binding.fullscreenButton.visibility = View.GONE
                                         } catch (_: Exception) {
                                         }
                                     },
@@ -1994,21 +2090,23 @@ class FreeformView(
                     onStart = {
                         isAnimating = true
                         backgroundView.visibility = View.VISIBLE
-                        windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                            height = rootHeight
-                            width = rootWidth
-                        })
-                        binding.freeformRoot.scaleX = mScaleX
-                        binding.freeformRoot.scaleY = mScaleY
-                        binding.cardRoot.radius = context.resources.getDimension(R.dimen.card_corner_radius)
+                        // Resize to freeform size with scale=1 (do not use root size + fractional scale —
+                        // that squeezed back/close/resize chrome after hang-up).
+                        refreshFreeformSize()
+                        runCatching {
+                            windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                                height = freeformHeight.coerceAtLeast(48)
+                                width = freeformWidth.coerceAtLeast(48)
+                            })
+                            binding.freeformRoot.scaleX = 1f
+                            binding.freeformRoot.scaleY = 1f
+                            mScaleX = 1f
+                            mScaleY = 1f
+                            binding.cardRoot.radius = context.resources.getDimension(R.dimen.card_corner_radius)
+                        }
                     },
                     onEnd = {
-                        isAnimating = false
-                        refreshScale()
-                        if (pendingOrientationChange) {
-                            pendingOrientationChange = false
-                            onFreeFormRotationChanged()
-                        }
+                        finishRestoreFromHangUp()
                     }
                 )
             }
@@ -2034,12 +2132,15 @@ class FreeformView(
                             startDelay = 80
                             addListener(
                                 onEnd = {
+                                    refreshFreeformSize()
                                     windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                                        height = rootHeight
-                                        width = rootWidth
+                                        height = freeformHeight.coerceAtLeast(48)
+                                        width = freeformWidth.coerceAtLeast(48)
                                     })
-                                    binding.freeformRoot.scaleX = mScaleX
-                                    binding.freeformRoot.scaleY = mScaleY
+                                    binding.freeformRoot.scaleX = 1f
+                                    binding.freeformRoot.scaleY = 1f
+                                    mScaleX = 1f
+                                    mScaleY = 1f
 
                                     binding.cardRoot.radius = context.resources.getDimension(R.dimen.card_corner_radius)
                                 }
@@ -2089,12 +2190,7 @@ class FreeformView(
                     },
                     onEnd = {
                         backgroundView.visibility = View.VISIBLE
-                        isAnimating = false
-                        refreshScale()
-                        if (pendingOrientationChange) {
-                            pendingOrientationChange = false
-                            onFreeFormRotationChanged()
-                        }
+                        finishRestoreFromHangUp()
                     }
                 )
                 duration = 250

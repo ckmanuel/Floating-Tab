@@ -61,3 +61,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Released alpha-27-de223be (top bounce, larger portrait hang-up, orientation reset per app). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-27-de223be
 - 2026-11-15: Fixed crash opening portrait apps on landscape device — refreshForNewApp/onFreeFormRotationChanged no longer call updateViewLayout when detached; showWindow updates instead of re-addView when already attached (re-add failure path was destroying freeform).
 - 2026-11-15: Released alpha-29-04efb01 (fix crash opening portrait apps on landscape). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-29-04efb01
+- 2026-11-15: Landscape-device + sensor/unspecified apps follow device orientation (landscape freeform). Hang-up restore uses freeform LayoutParams + scale=1 so chrome is not squeezed. Added bottom-left fullscreen button (moves task to default display then destroys freeform).
