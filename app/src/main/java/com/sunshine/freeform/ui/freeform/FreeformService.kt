@@ -103,6 +103,11 @@ class FreeformService: Service(), ScreenListener.ScreenStateListener {
                 mUserId = intent.getIntExtra(Intent.EXTRA_USER, 0)
                 mIntent = intent.getParcelableExtra(Intent.EXTRA_INTENT)
                 mComponentName = intent.getParcelableExtra(Intent.EXTRA_COMPONENT_NAME)
+                // App picker only passes EXTRA_INTENT (with .component), not EXTRA_COMPONENT_NAME.
+                // Resolve component before orientation detection or landscape apps stay portrait.
+                if (mComponentName == null && mIntent is Intent) {
+                    mComponentName = (mIntent as Intent).component
+                }
                 mFreeformView.config = mConfig
                 // Re-detect this activity's native orientation so alternating
                 // portrait/landscape apps do not keep the previous display mode.

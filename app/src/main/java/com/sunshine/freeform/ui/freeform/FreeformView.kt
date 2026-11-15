@@ -72,6 +72,9 @@ class FreeformView(
     //该小窗是否已经销毁
     var isDestroy = false
 
+    /** True while promoting the freeform task to the real full-screen display. */
+    private var goingFullscreen = false
+
     // 修复动画过程中调整方向导致的问题
     private var isAnimating = false
     private var pendingOrientationChange = false
@@ -702,12 +705,12 @@ class FreeformView(
 
     /**
      * Exit freeform and move the task to the default display as a normal full-screen app.
-     * The activity keeps its native orientation (system handles it on the real display).
+     * Uses moveStack (shell) / moveRootTaskToDisplay — does NOT inject BACK (that killed the app).
      */
     private fun goFullscreen() {
-        if (isDestroy) return
+        if (isDestroy || goingFullscreen) return
+        goingFullscreen = true
         try {
-            // Hide chrome immediately
             controlHandler.removeCallbacks(hideControlsRunnable)
             binding.backButton.visibility = View.GONE
             binding.closeButton.visibility = View.GONE
@@ -716,15 +719,36 @@ class FreeformView(
         } catch (_: Exception) {
         }
 
-        // Move the freeform task onto the real screen first
-        context.startService(
-            Intent(context, FreeformService::class.java)
-                .setAction(FreeformService.ACTION_CALL_INTENT)
-                .putExtra(FreeformService.EXTRA_DISPLAY_ID, defaultDisplay.displayId)
-        )
-        // Small delay so the activity can settle on the default display before teardown
-        scope.launch {
-            kotlinx.coroutines.delay(150)
+        scope.launch(Dispatchers.Main) {
+            var moved = false
+            // Preferred: ControlService shell move-stack to display 0
+            runCatching {
+                moved = com.sunshine.freeform.app.MiFreeform.me.controlService
+                    ?.moveStack(virtualDisplay.display.displayId) == true
+            }
+            // Fallback: move each tracked task via ActivityTaskManager
+            if (!moved && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val tasks = ArrayList(taskList)
+                for (tId in tasks) {
+                    runCatching {
+                        activityTaskManager.moveRootTaskToDisplay(tId, Display.DEFAULT_DISPLAY)
+                        moved = true
+                    }
+                }
+            }
+            // Last resort: relaunch the activity on the default display
+            if (!moved && config.componentName != null) {
+                runCatching {
+                    context.startService(
+                        Intent(context, FreeformService::class.java)
+                            .setAction(FreeformService.ACTION_CALL_INTENT)
+                            .putExtra(FreeformService.EXTRA_DISPLAY_ID, Display.DEFAULT_DISPLAY)
+                    )
+                    moved = true
+                }
+            }
+            // Give the system a moment to reparent the task before tearing down the VD
+            kotlinx.coroutines.delay(if (moved) 200 else 50)
             if (!isDestroy) destroy()
         }
     }
@@ -1739,20 +1763,8 @@ class FreeformView(
                         onStart = { isAnimating = true },
                         onEnd = {
                             isAnimating = false
-                            // Move the task back to the default display first, then tear down
-                            // the freeform window. This reduces crashes for landscape-native apps
-                            // that previously raced with virtual-display teardown.
-                            context.startService(
-                                Intent(context, FreeformService::class.java)
-                                    .setAction(FreeformService.ACTION_CALL_INTENT)
-                                    .putExtra(FreeformService.EXTRA_DISPLAY_ID, defaultDisplay.displayId)
-                            )
-                            // Small delay so the activity can settle on the default display
-                            // before we release the virtual display.
-                            scope.launch {
-                                kotlinx.coroutines.delay(150)
-                                if (!isDestroy) destroy()
-                            }
+                            // Same path as the fullscreen chrome button
+                            goFullscreen()
                         }
                     )
                     duration = 300
@@ -2302,10 +2314,10 @@ class FreeformView(
 
         // 清理虚拟显示
         runCatching {
-            // 在释放surface前发送返回键，强制关闭可能的输入法
-            if (virtualDisplay.surface != null) {
+            // Skip BACK when promoting to fullscreen — BACK was finishing the app.
+            // Only inject BACK for normal freeform close (helps dismiss IME).
+            if (!goingFullscreen && virtualDisplay.surface != null) {
                 performBackKey()
-                // 短暂延迟确保输入法有时间关闭
                 SystemClock.sleep(100)
             }
         }
@@ -2460,13 +2472,18 @@ class FreeformView(
                 }
             }
 
+            // Going fullscreen: leave the task on the default display
+            if (goingFullscreen && newDisplayId == Display.DEFAULT_DISPLAY) {
+                return
+            }
+
             if (taskList.contains(tId) && isFloating && newDisplayId == Display.DEFAULT_DISPLAY) {
                 context.startService(Intent(context, FreeformService::class.java).setAction(FreeformService.ACTION_START_INTENT).putExtra(Intent.EXTRA_INTENT, config.intent))
                 return
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (!isDestroy && taskList.contains(tId) && newDisplayId == Display.DEFAULT_DISPLAY) {
+                if (!isDestroy && !goingFullscreen && taskList.contains(tId) && newDisplayId == Display.DEFAULT_DISPLAY) {
                     if (config.useSuiRefuseToFullScreen)
                         activityTaskManager.moveRootTaskToDisplay(tId, virtualDisplay.display.displayId)
                     else
@@ -2487,7 +2504,9 @@ class FreeformView(
 
         private fun handleOrientationChange(tId: Int, requestedOrientation: Int) {
             val tempRotation = orientationToVirtualRotation(requestedOrientation)
-            if (taskList.contains(tId) && tempRotation != virtualDisplayRotation) {
+            // Apply when task is known OR taskList still empty (orientation can fire before onTaskCreated)
+            val ours = taskList.contains(tId) || taskList.isEmpty()
+            if (ours && tempRotation != virtualDisplayRotation) {
                 virtualDisplayRotation = tempRotation
                 if (isAnimating) {
                     pendingOrientationChange = true
