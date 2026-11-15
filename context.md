@@ -16,8 +16,11 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - **v1.0.0 First Stable Release** published (2026-11-15) based on commit 7ec7ca6 / former alpha-9.
   - Download: https://github.com/ckmanuel/Floating-Tab/releases/tag/v1.0.0
   - APK: Floating-Tab-1.0.0.apk (signed debug)
-- Post-1.0.0 work in progress on flyme branch:
-  - Fixed missing X/close button: it is now an independent always-visible control on the top-right of the freeform card (no longer inside the zero-height topBar). Shows simultaneously with the bottom resize bar.
+- Post-1.0.0 work on flyme branch (latest: b363f9a):
+  - Close button fixed (independent top-right control).
+  - Freeform sizing: clamp to physical screen, preserve orientation/aspect, defaults 90-95%.
+  - Move bar is move-only; separate bottom-right resize grip.
+  - Close + resize chrome auto-hides after 3s idle; reappears on move-bar touch.
 - Known open item from todo.md: Implement fluid gestures through accessibility so the back key can be listened to.
 
 ## Memory Entries
@@ -43,3 +46,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Freeform uses 90-95% of screen by default; resize updates real LayoutParams (fixes portrait freeze); max resize 95% of screen.
 - 2026-11-15: Hang-up mini window matches content orientation (landscape apps stay wide); smaller snap-to-corner threshold (0.42); freer resize 20-95%; drag resize-bar to move freeform; whole-box move in passive mode.
 - 2026-11-15: Bar is move-only; separate bottom-right resize button; close+resize auto-hide after 3s, reappear when bar is touched.
+- 2026-11-15 ~18:20 PST session start: Cloned repo (shallow) to /tmp, sanitized remote URL (no token), inspected latest commit b363f9a ("Separate move bar from resize; auto-hide chrome"). Restored context from context.md + todo.md. Ready to assist on next task.
