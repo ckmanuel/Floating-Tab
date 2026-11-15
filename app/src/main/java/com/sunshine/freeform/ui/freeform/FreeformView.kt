@@ -402,26 +402,45 @@ class FreeformView(
     }
 
     private fun initFloatViewSize() {
-        // 基于屏幕方向计算悬浮小窗大小
-        if (FreeformHelper.screenIsPortrait(screenRotation)) {
-            // 竖屏状态下，根据设定的比例计算高度和宽度
-            // 直接以屏幕宽度为基准计算正确宽高比的小窗
-            hangUpViewWidth = (realScreenWidth * config.floatViewSize).roundToInt()
-            hangUpViewHeight = (hangUpViewWidth / config.widthHeightRatio).roundToInt()
-        } else {
-            // 横屏状态保持原有逻辑
-            hangUpViewHeight = (rootHeight * config.floatViewSize).roundToInt()
-            hangUpViewWidth = (hangUpViewHeight * config.widthHeightRatio).roundToInt()
-        }
+        // Mini / hang-up size must match the APP content orientation, not only the device.
+        // Landscape-native apps stay wide; portrait-native apps stay tall — even when
+        // the phone itself is landscape (avoids the "squeezed portrait box" bug).
+        val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
+        val screenW = realScreenWidth.toFloat().coerceAtLeast(1f)
+        val screenH = realScreenHeight.toFloat().coerceAtLeast(1f)
+        val shortSide = min(screenW, screenH)
+        val floatFrac = config.floatViewSize.coerceIn(0.18f, 0.40f)
+        // Slightly smaller default mini window so "pop to corner" feels compact
+        val base = shortSide * floatFrac * 0.85f
 
-        // 横屏内容特殊处理逻辑保持不变
         if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-            hangUpViewWidth = (realScreenHeight * config.floatViewSize).roundToInt()
-            hangUpViewHeight = (hangUpViewWidth * config.widthHeightRatio).roundToInt()
-            if (!FreeformHelper.screenIsPortrait(screenRotation)) {
-                hangUpViewWidth = (realScreenWidth * config.floatViewSize).roundToInt()
-                hangUpViewHeight = (hangUpViewWidth * config.widthHeightRatio).roundToInt()
+            // Wide mini window (content is landscape)
+            var w = base.coerceAtMost(screenW * 0.42f)
+            var h = w * ratio
+            if (h > screenH * 0.45f) {
+                h = screenH * 0.40f
+                w = h / ratio
             }
+            if (w > screenW * 0.50f) {
+                w = screenW * 0.42f
+                h = w * ratio
+            }
+            hangUpViewWidth = w.roundToInt().coerceAtLeast(48)
+            hangUpViewHeight = h.roundToInt().coerceAtLeast(48)
+        } else {
+            // Tall mini window (content is portrait)
+            var w = base.coerceAtMost(screenW * 0.42f)
+            var h = w / ratio
+            if (h > screenH * 0.50f) {
+                h = screenH * 0.42f
+                w = h * ratio
+            }
+            if (w > screenW * 0.50f) {
+                w = screenW * 0.40f
+                h = w / ratio
+            }
+            hangUpViewWidth = w.roundToInt().coerceAtLeast(48)
+            hangUpViewHeight = h.roundToInt().coerceAtLeast(48)
         }
     }
 
@@ -981,8 +1000,8 @@ class FreeformView(
     }
 
     private fun refreshActionScale() {
-        // Thresholds relative to the freeform window itself (scale is now always ~1 in normal mode)
-        goFloatScale = 0.75f
+        // Must shrink further before snapping to the corner mini window
+        goFloatScale = 0.42f
         goFullScale = 1.15f
     }
 
@@ -1044,7 +1063,13 @@ class FreeformView(
                     val dx = event.rawX - lastX
                     val dy = event.rawY - lastY
 
-                    handleToFloatScale(0f, dy)
+                    // Active freeform: drag the resize bar to MOVE the window.
+                    // Mostly-vertical drags also resize (shrink/grow toward float/full).
+                    moveFreeformBy(dx, dy)
+                    if (kotlin.math.abs(dy) >= kotlin.math.abs(dx) * 0.6f) {
+                        handleToFloatScale(0f, dy)
+                    }
+
                     lastX = event.rawX
                     lastY = event.rawY
 
@@ -1056,11 +1081,28 @@ class FreeformView(
                     val dx = event.rawX - lastX
                     val dy = event.rawY - lastY
 
-                    handleToFloatScale(dx, 0f)
+                    // Landscape bar on the side: drag to move; mostly-horizontal also resizes
+                    moveFreeformBy(dx, dy)
+                    if (kotlin.math.abs(dx) >= kotlin.math.abs(dy) * 0.6f) {
+                        handleToFloatScale(dx, 0f)
+                    }
+
                     lastX = event.rawX
                     lastY = event.rawY
                 }
             }
+        }
+    }
+
+    /** Move the freeform window by a delta (used while dragging the resize tab). */
+    private fun moveFreeformBy(dx: Float, dy: Float) {
+        if (isFloating || isDestroy) return
+        try {
+            windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                x += dx.roundToInt()
+                y += dy.roundToInt()
+            })
+        } catch (_: Exception) {
         }
     }
 
@@ -1189,11 +1231,11 @@ class FreeformView(
             config.widthHeightRatio
         }
 
-        // Dynamic resize max: up to 95% of the current physical screen
-        val maxW = (realScreenWidth * 0.95f).roundToInt().coerceAtLeast(hangUpViewWidth)
-        val maxH = (realScreenHeight * 0.95f).roundToInt().coerceAtLeast(hangUpViewHeight)
-        val minW = hangUpViewWidth.coerceAtLeast(48)
-        val minH = hangUpViewHeight.coerceAtLeast(48)
+        // Dynamic resize: 20% … 95% of the current physical screen
+        val maxW = (realScreenWidth * 0.95f).roundToInt().coerceAtLeast(96)
+        val maxH = (realScreenHeight * 0.95f).roundToInt().coerceAtLeast(96)
+        val minW = maxOf(48, (realScreenWidth * 0.20f).roundToInt(), hangUpViewWidth / 2)
+        val minH = maxOf(48, (realScreenHeight * 0.20f).roundToInt(), hangUpViewHeight / 2)
 
         var changed = false
 
@@ -1315,12 +1357,16 @@ class FreeformView(
                                             startDelay = 200
                                             addListener(
                                                 onEnd = {
-                                                    mScaleX = scaleX
-                                                    mScaleY = scaleY
-                                                    binding.cardRoot.radius = context.resources.getDimension(R.dimen.card_corner_radius) * scaleX
+                                                    // Use hang-up size directly so landscape content
+                                                    // stays a wide mini window (not a portrait squeeze)
+                                                    initFloatViewSize()
+                                                    mScaleX = 1f
+                                                    mScaleY = 1f
+                                                    binding.cardRoot.radius = context.resources.getDimension(R.dimen.card_corner_radius) *
+                                                        (hangUpViewWidth / rootWidth.toFloat().coerceAtLeast(1f))
                                                     windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                                                        height = (rootHeight * scaleY).roundToInt()
-                                                        width = (rootWidth * scaleX).roundToInt()
+                                                        height = hangUpViewHeight
+                                                        width = hangUpViewWidth
                                                     })
 
                                                     binding.freeformRoot.scaleY = 1f

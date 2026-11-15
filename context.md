@@ -41,3 +41,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Renumbered all alpha release titles chronologically to Alpha 1 … Alpha 10 (oldest→newest). Explained why v1.0.0 appears mid-list (newer alphas published after it). Updated workflow for clearer future alpha titles.
 - 2026-11-15: Freeform sizing rewrite — always fit current physical screen; keep app native orientation; raised default freeform_size 75→90 and freeform_size_land 90→95; removed portrait-on-landscape 0.55 width cap that caused overflow.
 - 2026-11-15: Freeform uses 90-95% of screen by default; resize updates real LayoutParams (fixes portrait freeze); max resize 95% of screen.
+- 2026-11-15: Hang-up mini window matches content orientation (landscape apps stay wide); smaller snap-to-corner threshold (0.42); freer resize 20-95%; drag resize-bar to move freeform; whole-box move in passive mode.
