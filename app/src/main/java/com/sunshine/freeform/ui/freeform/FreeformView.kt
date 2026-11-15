@@ -340,20 +340,18 @@ class FreeformView(
 
         initFloatViewSize()
 
-        // Two-layer orientation:
-        // - Outer freeform window follows system/device orientation (screenRotation).
-        // - Virtual display / content follows the app's native requested orientation
-        //   (set later by TaskStackListener). Initial size uses current device orientation
-        //   so landscape device already gets a usable starting size.
-        if (FreeformHelper.screenIsPortrait(screenRotation)) {
-            freeformScreenHeight = (min(realScreenHeight, realScreenWidth) / config.widthHeightRatio).roundToInt()
-            freeformScreenWidth = (freeformScreenHeight * config.widthHeightRatio).roundToInt()
-        } else {
-            // Device is landscape: start with landscape-friendly virtual display size
-            freeformScreenWidth = (min(realScreenHeight, realScreenWidth) / config.widthHeightRatio).roundToInt()
+        // Detect native app orientation from the activity manifest so landscape apps
+        // open in landscape content mode even while the phone is still portrait.
+        applyInitialAppOrientation()
+
+        val baseShort = min(realScreenHeight, realScreenWidth)
+        if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+            // Landscape content: width > height inside the virtual display
+            freeformScreenWidth = (baseShort / config.widthHeightRatio).roundToInt()
             freeformScreenHeight = (freeformScreenWidth * config.widthHeightRatio).roundToInt()
-            // Still default virtualDisplayRotation to portrait until the app reports its preference.
-            // The first orientation callback will flip it if the app is landscape-native.
+        } else {
+            freeformScreenHeight = (baseShort / config.widthHeightRatio).roundToInt()
+            freeformScreenWidth = (freeformScreenHeight * config.widthHeightRatio).roundToInt()
         }
 
         config.rememberPosition = viewModel.getBooleanSp("remember_freeform_position", false)
@@ -374,6 +372,32 @@ class FreeformView(
 
         config.useSuiRefuseToFullScreen = viewModel.getBooleanSp("use_sui_refuse_to_fullscreen", false)
         config.manualAdjustFreeformRotation = viewModel.getBooleanSp("manual_adjust_freeform_rotation", false)
+    }
+
+
+    /**
+     * Read the target activity's screenOrientation from PackageManager.
+     * Landscape-native apps (YouTube, games, etc.) then start with a landscape
+     * virtual display even if the physical phone is still portrait.
+     */
+    private fun applyInitialAppOrientation() {
+        val cn = config.componentName ?: return
+        try {
+            val ai = context.packageManager.getActivityInfo(cn, 0)
+            virtualDisplayRotation = orientationToVirtualRotation(ai.screenOrientation)
+        } catch (e: Exception) {
+            // Keep default portrait virtual display
+        }
+    }
+
+    private fun orientationToVirtualRotation(requestedOrientation: Int): Int {
+        return when (requestedOrientation) {
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE,
+            ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE,
+            ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE -> VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
+            else -> VIRTUAL_DISPLAY_ROTATION_PORTRAIT
+        }
     }
 
     private fun initFloatViewSize() {
@@ -470,13 +494,13 @@ class FreeformView(
         binding.root.setOnTouchListener(this)
         binding.bottomBar.middleView.setOnTouchListener(this@FreeformView)
         binding.bottomBar.sideView.setOnTouchListener(this@FreeformView)
-        // Explicit close control — dismiss freeform without force-stopping the service.
-        // Guard against double-taps and Service-context inflation issues.
-        binding.bottomBar.closeButton.setOnClickListener {
+        // Persistent close control on the top-right of the freeform card
+        binding.topBar.closeButton.setOnClickListener {
             if (!isDestroy) {
                 destroy()
             }
         }
+        binding.topBar.closeButton.visibility = View.VISIBLE
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             binding.textureView.setOnTouchListener(touchListener)
@@ -549,7 +573,6 @@ class FreeformView(
                 }
                 middleView.visibility = View.VISIBLE
                 sideView.visibility = View.GONE
-                closeButton.visibility = View.VISIBLE
             }
         } else {
             binding.bottomBar.apply {
@@ -564,7 +587,6 @@ class FreeformView(
                 }
                 middleView.visibility = View.GONE
                 sideView.visibility = View.VISIBLE
-                closeButton.visibility = View.VISIBLE
             }
         }
     }
@@ -891,34 +913,60 @@ class FreeformView(
     }
 
     private fun refreshFreeformSize() {
-        // Uniform freeform geometry:
-        // - Portrait content → fixed 9:16 window sized by freeformSize
-        // - Landscape content → fixed 16:9 window sized by freeformSizeLand
-        // Independent of the chaotic root/scale pairing that made sizes look "junky".
-        val shortSide = min(realScreenWidth, realScreenHeight).toFloat()
-        val longSide = max(realScreenWidth, realScreenHeight).toFloat()
-        val ratio = config.widthHeightRatio.coerceAtLeast(0.4f) // default ~9/16
+        // Always fit the CURRENT physical screen while keeping content aspect ratio.
+        // Landscape apps stay landscape (virtual display), but the outer window shrinks
+        // to fit when the phone is rotated to portrait.
+        val screenW = realScreenWidth.toFloat().coerceAtLeast(1f)
+        val screenH = realScreenHeight.toFloat().coerceAtLeast(1f)
+        val ratio = config.widthHeightRatio.coerceAtLeast(0.4f) // ~9/16
+        val maxW = screenW * 0.96f
+        val maxH = screenH * 0.90f
 
         if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-            // Landscape content: width > height (16:9-ish)
-            var w = (longSide * config.freeformSizeLand).roundToInt()
-            var h = (w * ratio).roundToInt()
-            if (h > shortSide * 0.9f) {
-                h = (shortSide * 0.85f).roundToInt()
-                w = (h / ratio).roundToInt()
+            // Content is landscape: outer aspect ~ 16:9 (w/h = 1/ratio)
+            val prefer = if (FreeformHelper.screenIsPortrait(screenRotation)) {
+                config.freeformSize
+            } else {
+                config.freeformSizeLand
             }
-            freeformWidth = w + cardWidthMargin.roundToInt()
-            freeformHeight = h
+            var w = (screenW * prefer).coerceAtMost(maxW)
+            var h = w * ratio
+            if (h > maxH) {
+                h = maxH
+                w = h / ratio
+            }
+            if (w > maxW) {
+                w = maxW
+                h = w * ratio
+            }
+            freeformWidth = w.roundToInt()
+            freeformHeight = (h + cardHeightMargin).roundToInt()
         } else {
-            // Portrait content: height > width (9:16)
-            var w = (shortSide * config.freeformSize).roundToInt()
-            var h = (w / ratio).roundToInt()
-            if (h > longSide * 0.9f) {
-                h = (longSide * 0.85f).roundToInt()
-                w = (h * ratio).roundToInt()
+            // Content is portrait: outer aspect ~ 9:16 (h/w = 1/ratio)
+            val prefer = if (FreeformHelper.screenIsPortrait(screenRotation)) {
+                config.freeformSize
+            } else {
+                config.freeformSizeLand
             }
-            freeformWidth = w
-            freeformHeight = h + cardHeightMargin.roundToInt()
+            if (FreeformHelper.screenIsPortrait(screenRotation)) {
+                var w = (screenW * prefer).coerceAtMost(maxW)
+                var h = w / ratio
+                if (h > maxH) {
+                    h = maxH
+                    w = h * ratio
+                }
+                freeformWidth = w.roundToInt()
+                freeformHeight = (h + cardHeightMargin).roundToInt()
+            } else {
+                var h = (screenH * prefer).coerceAtMost(maxH)
+                var w = h * ratio
+                if (w > maxW * 0.55f) {
+                    w = maxW * 0.5f
+                    h = w / ratio
+                }
+                freeformWidth = (w + cardWidthMargin).roundToInt()
+                freeformHeight = h.roundToInt()
+            }
         }
     }
 
@@ -2036,13 +2084,7 @@ class FreeformView(
         }
 
         private fun handleOrientationChange(tId: Int, requestedOrientation: Int) {
-            val tempRotation = when (requestedOrientation) {
-                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
-                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE,
-                ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE,
-                ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE -> VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
-                else -> VIRTUAL_DISPLAY_ROTATION_PORTRAIT
-            }
+            val tempRotation = orientationToVirtualRotation(requestedOrientation)
             if (taskList.contains(tId) && tempRotation != virtualDisplayRotation) {
                 virtualDisplayRotation = tempRotation
                 if (isAnimating) {
@@ -2053,7 +2095,6 @@ class FreeformView(
 
                 orientationChangeJob?.cancel()
                 orientationChangeJob = scope.launch(Dispatchers.Main) {
-                    // 增加防抖，避免过于频繁的刷新
                     delay(100)
                     onFreeFormRotationChanged()
                 }
