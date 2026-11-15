@@ -334,8 +334,9 @@ class FreeformView(
         //优化 QQ和微信也支持缩放了 q220917.1
         //挂起大小设置
         config.floatViewSize = (viewModel.getIntSp("freeform_float_view_size", 25)) / 75.toFloat()
-        config.freeformSize = (viewModel.getIntSp("freeform_size", 75)) / 100.toFloat()
-        config.freeformSizeLand = (viewModel.getIntSp("freeform_size_land", 90)) / 100.toFloat()
+        // Defaults raised so freeform uses more of the screen (user can still lower in settings)
+        config.freeformSize = (viewModel.getIntSp("freeform_size", 90)) / 100.toFloat()
+        config.freeformSizeLand = (viewModel.getIntSp("freeform_size_land", 95)) / 100.toFloat()
         config.dimAmount = (viewModel.getIntSp("freeform_dimming_amount", 20)) / 100.toFloat()
 
         initFloatViewSize()
@@ -913,61 +914,68 @@ class FreeformView(
     }
 
     private fun refreshFreeformSize() {
-        // Always fit the CURRENT physical screen while keeping content aspect ratio.
-        // Landscape apps stay landscape (virtual display), but the outer window shrinks
-        // to fit when the phone is rotated to portrait.
+        // Two-layer sizing:
+        // 1) Content keeps the app's native orientation (virtualDisplayRotation).
+        // 2) Outer window always fits the CURRENT physical screen bounds.
         val screenW = realScreenWidth.toFloat().coerceAtLeast(1f)
         val screenH = realScreenHeight.toFloat().coerceAtLeast(1f)
-        val ratio = config.widthHeightRatio.coerceAtLeast(0.4f) // ~9/16
-        val maxW = screenW * 0.96f
-        val maxH = screenH * 0.90f
+        // width/height ratio for portrait content (~9/16). Landscape content uses the inverse.
+        val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
 
-        if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-            // Content is landscape: outer aspect ~ 16:9 (w/h = 1/ratio)
-            val prefer = if (FreeformHelper.screenIsPortrait(screenRotation)) {
-                config.freeformSize
-            } else {
-                config.freeformSizeLand
-            }
-            var w = (screenW * prefer).coerceAtMost(maxW)
-            var h = w * ratio
-            if (h > maxH) {
-                h = maxH
-                w = h / ratio
-            }
-            if (w > maxW) {
-                w = maxW
-                h = w * ratio
-            }
-            freeformWidth = w.roundToInt()
-            freeformHeight = (h + cardHeightMargin).roundToInt()
+        // Room for the whole freeform chrome (content + resize bar / shadow)
+        val maxOuterW = screenW * 0.98f
+        val maxOuterH = screenH * 0.94f
+        val marginW = cardWidthMargin.coerceAtLeast(0f)
+        val marginH = cardHeightMargin.coerceAtLeast(0f)
+        val maxContentW = (maxOuterW - marginW).coerceAtLeast(48f)
+        val maxContentH = (maxOuterH - marginH).coerceAtLeast(48f)
+
+        val contentIsLandscape =
+            virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
+        val deviceIsPortrait = FreeformHelper.screenIsPortrait(screenRotation)
+
+        // Preferred fraction of the relevant screen edge (settings, with sane bounds)
+        val prefer = (if (deviceIsPortrait) config.freeformSize else config.freeformSizeLand)
+            .coerceIn(0.45f, 0.98f)
+
+        var contentW: Float
+        var contentH: Float
+
+        if (contentIsLandscape) {
+            // Landscape content: w/h = 1/ratio  (≈ 16:9)
+            contentW = (screenW * prefer).coerceAtMost(maxContentW)
+            contentH = contentW * ratio
         } else {
-            // Content is portrait: outer aspect ~ 9:16 (h/w = 1/ratio)
-            val prefer = if (FreeformHelper.screenIsPortrait(screenRotation)) {
-                config.freeformSize
+            // Portrait content: h/w = 1/ratio  (≈ 16:9 tall)
+            if (deviceIsPortrait) {
+                contentW = (screenW * prefer).coerceAtMost(maxContentW)
+                contentH = contentW / ratio
             } else {
-                config.freeformSizeLand
-            }
-            if (FreeformHelper.screenIsPortrait(screenRotation)) {
-                var w = (screenW * prefer).coerceAtMost(maxW)
-                var h = w / ratio
-                if (h > maxH) {
-                    h = maxH
-                    w = h * ratio
-                }
-                freeformWidth = w.roundToInt()
-                freeformHeight = (h + cardHeightMargin).roundToInt()
-            } else {
-                var h = (screenH * prefer).coerceAtMost(maxH)
-                var w = h * ratio
-                if (w > maxW * 0.55f) {
-                    w = maxW * 0.5f
-                    h = w / ratio
-                }
-                freeformWidth = (w + cardWidthMargin).roundToInt()
-                freeformHeight = h.roundToInt()
+                // Device is landscape: height is the tight edge for tall content
+                contentH = (screenH * prefer).coerceAtMost(maxContentH)
+                contentW = contentH * ratio
             }
         }
+
+        // Strict fit while preserving aspect — may need two passes
+        fun clampToScreen() {
+            if (contentW > maxContentW) {
+                contentW = maxContentW
+                contentH = if (contentIsLandscape) contentW * ratio else contentW / ratio
+            }
+            if (contentH > maxContentH) {
+                contentH = maxContentH
+                contentW = if (contentIsLandscape) contentH / ratio else contentH * ratio
+            }
+        }
+        clampToScreen()
+        clampToScreen()
+
+        // Final outer size (content + chrome), never beyond the physical screen
+        freeformWidth = (contentW + marginW).roundToInt()
+            .coerceIn(48, screenW.roundToInt())
+        freeformHeight = (contentH + marginH).roundToInt()
+            .coerceIn(48, screenH.roundToInt())
     }
 
     private fun refreshScale() {
