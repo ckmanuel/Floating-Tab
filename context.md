@@ -67,3 +67,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Released alpha-33-d6f71db (landscape orient + fullscreen fix). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-33-d6f71db
 - 2026-11-15: Hardened goFullscreen (moveStack + am start display 0, longer delay, never BACK). Safe mScale setters. Clamp freeform sizes to physical screen for landscape+landscape. try/catch around refreshForNewApp and onFreeFormRotationChanged.
 - 2026-11-15: Released alpha-35-424f9ed (landscape/fullscreen crash hardening). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-35-424f9ed
+- 2026-11-15: Fullscreen for landscape apps — unregister task listener first; try ATM + move-stack + am task move-to-display + am start --display 0; ignore onTaskRemoval during promote; longer delay before VD teardown; improved moveStack parsing.
