@@ -103,24 +103,21 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: alpha-${{ github.run_number }}-${{ steps.apk.outputs.short_sha }}
-          name: Alpha build #${{ github.run_number }} (signed debug)
+          name: Alpha ${{ github.run_number }}
           body: |
-            **Alpha build for testing (signed debug APK)**
+            **Alpha ${{ github.run_number }}** (pre-release for testing)
 
             - Branch: `${{ github.ref_name }}`
             - Commit: `${{ github.sha }}`
-            - Signed with the Android debug keystore (installable)
-            - Includes two-layer orientation fix
-
-            ### Previous alpha was unsigned
-            The earlier `assembleRelease` APK had no signing config and was rejected by Android as "package invalid". This build uses `assembleDebug` so it is properly signed.
+            - Tag: `alpha-${{ github.run_number }}-${{ steps.apk.outputs.short_sha }}`
+            - Signed debug APK (installable)
 
             ### How to test
             1. Uninstall any previous version of the app first.
             2. Install this APK.
             3. Grant Shizuku, accessibility, and overlay permissions as required.
             4. Open landscape-native apps in freeform (portrait and landscape device orientation).
-            5. Try freeform → full screen on those apps.
+            5. Check that the X (close) button is visible top-right together with the resize bar.
           files: Floating-Tab-alpha.apk
           prerelease: true
           generate_release_notes: false
