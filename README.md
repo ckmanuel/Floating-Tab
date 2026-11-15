@@ -3,7 +3,7 @@
 Floating windows for Android — open apps in a resizable freeform overlay while you keep using the rest of your phone.
 
 **Developer:** [ckmanuel](https://github.com/ckmanuel)  
-**Latest stable:** [v1.1.0](https://github.com/ckmanuel/Floating-Tab/releases/tag/v1.1.0)
+**Latest stable:** [v1.2.0](https://github.com/ckmanuel/Floating-Tab/releases/tag/v1.2.0)
 
 Based on the open-source Mi-Freeform / Flyme freeform work, maintained here as **Floating-Tab** with an English UI and ongoing freeform polish.
 
@@ -45,7 +45,7 @@ Based on the open-source Mi-Freeform / Flyme freeform work, maintained here as *
 
 ## Alpha builds
 
-Pre-release builds are published as `alpha-N` on the same [Releases](https://github.com/ckmanuel/Floating-Tab/releases) page. Prefer **v1.1.0** for daily use.
+Pre-release builds are published as `alpha-N` on the same [Releases](https://github.com/ckmanuel/Floating-Tab/releases) page. Prefer **v1.2.0** for daily use.
 
 ## Open API
 

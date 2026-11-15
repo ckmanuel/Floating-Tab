@@ -17,8 +17,8 @@ android {
         applicationId = "com.sunshine.freeform"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1100
-        versionName = "1.1.0"
+        versionCode = 1200
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     

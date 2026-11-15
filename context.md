@@ -13,13 +13,11 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - Target: reliable freeform windows on Android 10+.
 
 ## Current Status (update this)
-- **v1.0.0 First Stable Release** published (2026-11-15) based on commit 7ec7ca6 / former alpha-9.
-  - Download: https://github.com/ckmanuel/Floating-Tab/releases/tag/v1.0.0
-  - APK: Floating-Tab-1.0.0.apk (signed debug)
-- **v1.1 base** (flyme): Restored stable freeform from renumbered alpha-25. Fullscreen chrome fully removed.
-- **In progress fix (session)**: touch inaccuracy after landscape→portrait app switch + landscape apps black-screening on reenter after freeform close.
-  - Root causes: (1) refreshTouchScale not called after size/orientation changes; (2) close only injected BACK + released surface, leaving landscape tasks broken on the VD; (3) after destroy, startIntent ran before TextureView surface was attached.
-  - Fixes: always refreshTouchScale + buffer size on refresh/rotation/show; on destroy move freeform tasks to DEFAULT_DISPLAY instead of BACK; after destroy show window (attach surface) before startIntent.
+- **v1.2.0 Stable Release** (final for now) — based on alpha-31 freeform polish.
+  - Download: https://github.com/ckmanuel/Floating-Tab/releases/tag/v1.2.0
+  - APK: Floating-Tab-1.2.0.apk (signed debug)
+  - Highlights vs 1.1: reliable landscape freeform open/reopen, accurate touch after orientation switches, chrome buttons correctly separated (Back / Close / Resize), no fullscreen chrome.
+- Prior stables: v1.1.0, v1.0.0.
 - Known open item from todo.md: Implement fluid gestures through accessibility so the system back key can be routed to the last-touched window (freeform vs fullscreen).
 
 ## Memory Entries
@@ -76,3 +74,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Released alpha-30-6fda2ab (landscape black/oversized fix). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-30-6fda2ab
 - 2026-11-15: Fix mixed chrome buttons. Close no longer injects BACK (that made X==Back). Buttons consume their own touches + bringToFront; larger hit targets. Fullscreen button remains removed (oversize snaps back to freeform).
 - 2026-11-15: Released alpha-31-2f6a561 (chrome buttons unmixed). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-31-2f6a561
+- 2026-11-16: Published **v1.2.0** stable (final build for now). From alpha-31 line: landscape freeform, touch scale, clean close/reopen, chrome button roles fixed.
