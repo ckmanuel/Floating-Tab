@@ -18,6 +18,8 @@ import android.graphics.SurfaceTexture
 import android.hardware.display.VirtualDisplay
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
@@ -300,6 +302,13 @@ class FreeformView(
 
     //是否处于挂起状态
     var isFloating = false
+
+    // Close + resize chrome: show on bar interaction, auto-hide after idle
+    private val controlHandler = Handler(Looper.getMainLooper())
+    private val hideControlsRunnable = Runnable { hideWindowControls() }
+    private val controlsHideDelayMs = 3000L
+    private var controlsVisible = true
+
     //挂起位置，0：是否在左，1：是否在上
     private val hangUpPosition = booleanArrayOf(false, true)
 
@@ -514,13 +523,48 @@ class FreeformView(
         binding.root.setOnTouchListener(this)
         binding.bottomBar.middleView.setOnTouchListener(this@FreeformView)
         binding.bottomBar.sideView.setOnTouchListener(this@FreeformView)
-        // Always-visible close button (top-right of card), shown together with the resize bar
+        // Close (top-right) + resize (bottom-right); auto-hide after 3s of idle
         binding.closeButton.setOnClickListener {
             if (!isDestroy) {
                 destroy()
             }
         }
-        binding.closeButton.visibility = View.VISIBLE
+        binding.resizeButton.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    showWindowControls()
+                    touchId = R.id.resizeButton
+                    lastX = event.rawX
+                    lastY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (touchId == R.id.resizeButton) {
+                        val dx = event.rawX - lastX
+                        val dy = event.rawY - lastY
+                        // Corner resize: both axes (keep aspect via handleToFloatScale primary axis)
+                        if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) {
+                            handleToFloatScale(dx, 0f)
+                        } else {
+                            handleToFloatScale(0f, dy)
+                        }
+                        lastX = event.rawX
+                        lastY = event.rawY
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (touchId == R.id.resizeButton) {
+                        notifyToFloat()
+                    }
+                    touchId = -1
+                    scheduleHideWindowControls()
+                    true
+                }
+                else -> false
+            }
+        }
+        showWindowControls()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             binding.textureView.setOnTouchListener(touchListener)
@@ -1045,9 +1089,11 @@ class FreeformView(
                 backgroundGestureDetector.onTouchEvent(event)
             }
             R.id.middleView -> {
+                showWindowControls()
                 middleGestureDetector.onTouchEvent(event)
             }
             R.id.sideView -> {
+                showWindowControls()
                 middleGestureDetector.onTouchEvent(event)
             }
         }
@@ -1062,17 +1108,10 @@ class FreeformView(
                 if (touchId == R.id.middleView) {
                     val dx = event.rawX - lastX
                     val dy = event.rawY - lastY
-
-                    // Active freeform: drag the resize bar to MOVE the window.
-                    // Mostly-vertical drags also resize (shrink/grow toward float/full).
+                    // Bar is move-only; resize is the corner button
                     moveFreeformBy(dx, dy)
-                    if (kotlin.math.abs(dy) >= kotlin.math.abs(dx) * 0.6f) {
-                        handleToFloatScale(0f, dy)
-                    }
-
                     lastX = event.rawX
                     lastY = event.rawY
-
                     middleGestureDetector.onTouchEvent(event)
                 }
             }
@@ -1080,13 +1119,7 @@ class FreeformView(
                 if (touchId == R.id.sideView) {
                     val dx = event.rawX - lastX
                     val dy = event.rawY - lastY
-
-                    // Landscape bar on the side: drag to move; mostly-horizontal also resizes
                     moveFreeformBy(dx, dy)
-                    if (kotlin.math.abs(dx) >= kotlin.math.abs(dy) * 0.6f) {
-                        handleToFloatScale(dx, 0f)
-                    }
-
                     lastX = event.rawX
                     lastY = event.rawY
                 }
@@ -1094,7 +1127,43 @@ class FreeformView(
         }
     }
 
-    /** Move the freeform window by a delta (used while dragging the resize tab). */
+    private fun showWindowControls() {
+        if (isDestroy || isFloating) return
+        controlsVisible = true
+        try {
+            binding.closeButton.animate().cancel()
+            binding.resizeButton.animate().cancel()
+            binding.closeButton.visibility = View.VISIBLE
+            binding.resizeButton.visibility = View.VISIBLE
+            binding.closeButton.alpha = 1f
+            binding.resizeButton.alpha = 1f
+        } catch (_: Exception) {
+        }
+        scheduleHideWindowControls()
+    }
+
+    private fun hideWindowControls() {
+        if (isDestroy || isFloating) return
+        controlsVisible = false
+        try {
+            binding.closeButton.animate().alpha(0f).setDuration(200).withEndAction {
+                if (!controlsVisible) binding.closeButton.visibility = View.GONE
+            }.start()
+            binding.resizeButton.animate().alpha(0f).setDuration(200).withEndAction {
+                if (!controlsVisible) binding.resizeButton.visibility = View.GONE
+            }.start()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun scheduleHideWindowControls() {
+        controlHandler.removeCallbacks(hideControlsRunnable)
+        if (!isFloating && !isDestroy) {
+            controlHandler.postDelayed(hideControlsRunnable, controlsHideDelayMs)
+        }
+    }
+
+    /** Move the freeform window by a delta (used while dragging the move bar). */
     private fun moveFreeformBy(dx: Float, dy: Float) {
         if (isFloating || isDestroy) return
         try {
@@ -1113,11 +1182,12 @@ class FreeformView(
             }
             R.id.middleView -> {
                 middleGestureDetector.onTouchEvent(event)
-                notifyToFloat()
+                // Bar is move-only now; no size-snap from bar drag
+                scheduleHideWindowControls()
             }
             R.id.sideView -> {
-                notifyToFloat()
                 middleGestureDetector.onTouchEvent(event)
+                scheduleHideWindowControls()
             }
         }
         touchId = -1
@@ -1376,6 +1446,12 @@ class FreeformView(
                                             start()
                                         }
                                         isFloating = true
+                                        controlHandler.removeCallbacks(hideControlsRunnable)
+                                        try {
+                                            binding.closeButton.visibility = View.GONE
+                                            binding.resizeButton.visibility = View.GONE
+                                        } catch (_: Exception) {
+                                        }
                                     },
                                     onEnd = {
                                         binding.textureView.setOnTouchListener(FloatViewTouchListener())
@@ -1868,6 +1944,7 @@ class FreeformView(
         }
 
         isFloating = false
+        showWindowControls()
 
         setWindowNoUpdateAnimation()
     }
@@ -1962,8 +2039,10 @@ class FreeformView(
         }
 
         isDestroy = true
+        controlHandler.removeCallbacks(hideControlsRunnable)
         isHidden = false
         isFloating = false
+        showWindowControls()
 
         // 清理虚拟显示
         runCatching {

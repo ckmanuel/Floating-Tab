@@ -73,8 +73,7 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent" />
 
-        <!-- Always-visible close button, top-right of the freeform card.
-             Independent of the zero-height topBar so it shows together with the resize bar. -->
+        <!-- Close (top-right) and resize (bottom-right); auto-hide after idle -->
         <ImageButton
             android:id="@+id/closeButton"
             android:layout_width="36dp"
@@ -89,6 +88,22 @@
             android:elevation="8dp"
             android:visibility="visible"
             app:layout_constraintTop_toTopOf="@id/cardRoot"
+            app:layout_constraintEnd_toEndOf="@id/cardRoot" />
+
+        <ImageButton
+            android:id="@+id/resizeButton"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginBottom="8dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/close_button_bg"
+            android:contentDescription="@string/done"
+            android:padding="6dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_resize"
+            android:elevation="8dp"
+            android:visibility="visible"
+            app:layout_constraintBottom_toBottomOf="@id/cardRoot"
             app:layout_constraintEnd_toEndOf="@id/cardRoot" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
