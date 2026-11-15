@@ -66,3 +66,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Fixed landscape apps staying portrait — componentName was null at refreshForNewApp (picker only passes EXTRA_INTENT). Fixed fullscreen killing the app — use moveStack/moveRootTaskToDisplay and skip BACK inject when goingFullscreen.
 - 2026-11-15: Released alpha-33-d6f71db (landscape orient + fullscreen fix). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-33-d6f71db
 - 2026-11-15: Hardened goFullscreen (moveStack + am start display 0, longer delay, never BACK). Safe mScale setters. Clamp freeform sizes to physical screen for landscape+landscape. try/catch around refreshForNewApp and onFreeFormRotationChanged.
+- 2026-11-15: Released alpha-35-424f9ed (landscape/fullscreen crash hardening). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-35-424f9ed
