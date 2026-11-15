@@ -914,17 +914,14 @@ class FreeformView(
     }
 
     private fun refreshFreeformSize() {
-        // Two-layer sizing:
-        // 1) Content keeps the app's native orientation (virtualDisplayRotation).
-        // 2) Outer window always fits the CURRENT physical screen bounds.
+        // Content keeps the app's native orientation; outer window fits the
+        // current physical screen and targets ~90-95% of available space.
         val screenW = realScreenWidth.toFloat().coerceAtLeast(1f)
         val screenH = realScreenHeight.toFloat().coerceAtLeast(1f)
-        // width/height ratio for portrait content (~9/16). Landscape content uses the inverse.
         val ratio = config.widthHeightRatio.coerceIn(0.4f, 0.75f)
 
-        // Room for the whole freeform chrome (content + resize bar / shadow)
-        val maxOuterW = screenW * 0.98f
-        val maxOuterH = screenH * 0.94f
+        val maxOuterW = screenW * 0.95f
+        val maxOuterH = screenH * 0.95f
         val marginW = cardWidthMargin.coerceAtLeast(0f)
         val marginH = cardHeightMargin.coerceAtLeast(0f)
         val maxContentW = (maxOuterW - marginW).coerceAtLeast(48f)
@@ -934,30 +931,24 @@ class FreeformView(
             virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
         val deviceIsPortrait = FreeformHelper.screenIsPortrait(screenRotation)
 
-        // Preferred fraction of the relevant screen edge (settings, with sane bounds)
+        // Always aim for a large freeform (90-95% of the limiting edge)
         val prefer = (if (deviceIsPortrait) config.freeformSize else config.freeformSizeLand)
-            .coerceIn(0.45f, 0.98f)
+            .coerceIn(0.90f, 0.95f)
 
         var contentW: Float
         var contentH: Float
 
         if (contentIsLandscape) {
-            // Landscape content: w/h = 1/ratio  (≈ 16:9)
             contentW = (screenW * prefer).coerceAtMost(maxContentW)
             contentH = contentW * ratio
+        } else if (deviceIsPortrait) {
+            contentW = (screenW * prefer).coerceAtMost(maxContentW)
+            contentH = contentW / ratio
         } else {
-            // Portrait content: h/w = 1/ratio  (≈ 16:9 tall)
-            if (deviceIsPortrait) {
-                contentW = (screenW * prefer).coerceAtMost(maxContentW)
-                contentH = contentW / ratio
-            } else {
-                // Device is landscape: height is the tight edge for tall content
-                contentH = (screenH * prefer).coerceAtMost(maxContentH)
-                contentW = contentH * ratio
-            }
+            contentH = (screenH * prefer).coerceAtMost(maxContentH)
+            contentW = contentH * ratio
         }
 
-        // Strict fit while preserving aspect — may need two passes
         fun clampToScreen() {
             if (contentW > maxContentW) {
                 contentW = maxContentW
@@ -971,13 +962,11 @@ class FreeformView(
         clampToScreen()
         clampToScreen()
 
-        // Final outer size (content + chrome), never beyond the physical screen
         freeformWidth = (contentW + marginW).roundToInt()
             .coerceIn(48, screenW.roundToInt())
         freeformHeight = (contentH + marginH).roundToInt()
             .coerceIn(48, screenH.roundToInt())
     }
-
     private fun refreshScale() {
         mScaleX = freeformWidth / rootWidth.toFloat()
         mScaleY = freeformHeight / rootHeight.toFloat()
@@ -1195,57 +1184,84 @@ class FreeformView(
         if (isFloating) return
 
         val ratio = if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-            1 / config.widthHeightRatio
+            1f / config.widthHeightRatio
         } else {
             config.widthHeightRatio
         }
 
+        // Dynamic resize max: up to 95% of the current physical screen
+        val maxW = (realScreenWidth * 0.95f).roundToInt().coerceAtLeast(hangUpViewWidth)
+        val maxH = (realScreenHeight * 0.95f).roundToInt().coerceAtLeast(hangUpViewHeight)
+        val minW = hangUpViewWidth.coerceAtLeast(48)
+        val minH = hangUpViewHeight.coerceAtLeast(48)
+
+        var changed = false
+
         if (dy != 0f) {
-            val tempHeight = freeformHeight + dy
-            if (tempHeight >= hangUpViewHeight && tempHeight <= rootHeight * 0.9) {
-                freeformHeight += dy.roundToInt()
-
-                val contentHeight = freeformHeight - cardHeightMargin
+            val tempHeight = freeformHeight + dy.roundToInt()
+            if (tempHeight in minH..maxH) {
+                freeformHeight = tempHeight
+                val contentHeight = (freeformHeight - cardHeightMargin).coerceAtLeast(1f)
                 val contentWidth = contentHeight * ratio
-                if (FreeformHelper.screenIsPortrait(screenRotation)) {
-                    freeformWidth = (contentWidth + (freeformShadow * 2)).roundToInt()
+                freeformWidth = if (FreeformHelper.screenIsPortrait(screenRotation)) {
+                    (contentWidth + freeformShadow * 2).roundToInt()
                 } else {
-                    freeformWidth = (contentWidth + cardWidthMargin).roundToInt()
+                    (contentWidth + cardWidthMargin).roundToInt()
                 }
-
-                mScaleX = freeformWidth / rootWidth.toFloat()
-                mScaleY = freeformHeight / rootHeight.toFloat()
-
-                isZoomOut = true
+                freeformWidth = freeformWidth.coerceIn(minW, maxW)
+                changed = true
             }
         } else if (dx != 0f) {
-            val tempWidth = freeformWidth + dx
-            if (tempWidth >= hangUpViewWidth && tempWidth <= rootWidth * 0.9) {
-                freeformWidth += dx.roundToInt()
-
+            val tempWidth = freeformWidth + dx.roundToInt()
+            if (tempWidth in minW..maxW) {
+                freeformWidth = tempWidth
                 val contentWidth = if (FreeformHelper.screenIsPortrait(screenRotation)) {
-                    freeformWidth - (freeformShadow * 2)
+                    (freeformWidth - freeformShadow * 2).coerceAtLeast(1f)
                 } else {
-                    freeformWidth - cardWidthMargin
+                    (freeformWidth - cardWidthMargin).coerceAtLeast(1f)
                 }
                 val contentHeight = contentWidth / ratio
                 freeformHeight = (contentHeight + cardHeightMargin).roundToInt()
-
-                mScaleX = freeformWidth / rootWidth.toFloat()
-                mScaleY = freeformHeight / rootHeight.toFloat()
-
-                isZoomOut = true
+                    .coerceIn(minH, maxH)
+                // Keep aspect if height hit the clamp
+                val adjustedContentH = (freeformHeight - cardHeightMargin).coerceAtLeast(1f)
+                val adjustedContentW = adjustedContentH * ratio
+                freeformWidth = if (FreeformHelper.screenIsPortrait(screenRotation)) {
+                    (adjustedContentW + freeformShadow * 2).roundToInt()
+                } else {
+                    (adjustedContentW + cardWidthMargin).roundToInt()
+                }.coerceIn(minW, maxW)
+                changed = true
             }
+        }
+
+        if (changed) {
+            // Update real window LayoutParams with scale=1. Scaling the view
+            // without resizing the window broke touch mapping and froze portrait apps.
+            mScaleX = 1f
+            mScaleY = 1f
+            binding.freeformRoot.scaleX = 1f
+            binding.freeformRoot.scaleY = 1f
+            try {
+                windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                    width = freeformWidth
+                    height = freeformHeight
+                })
+            } catch (_: Exception) {
+            }
+            refreshTouchScale()
+            isZoomOut = true
         }
     }
 
-    @SuppressLint("ClickableViewAccessibility")
     private fun notifyToFloat() {
         if (isZoomOut) {
             val scaleX: Float = hangUpViewWidth / rootWidth.toFloat()
             val scaleY: Float = hangUpViewHeight / rootHeight.toFloat()
+            // Size-based thresholds (resize now uses real LayoutParams with scale=1)
+            val sizeRatio = freeformHeight / realScreenHeight.toFloat().coerceAtLeast(1f)
 
-            if (mScaleY <= goFloatScale) {
+            if (sizeRatio <= goFloatScale) {
                 AnimatorSet().apply {
                     playTogether(
                         ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, scaleX),
@@ -1334,7 +1350,7 @@ class FreeformView(
                     duration = 200
                     start()
                 }
-            } else if (mScaleY >= goFullScale){
+            } else if (sizeRatio >= goFullScale) {
                 AnimatorSet().apply {
                     playTogether(
                         ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, 1f),
@@ -1373,26 +1389,23 @@ class FreeformView(
                     start()
                 }
             } else {
-                val restoreScale = getRestoreFreeformScale()
-
-                AnimatorSet().apply {
-                    playTogether(
-                        ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, restoreScale[0]),
-                        ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, mScaleY, restoreScale[1]),
-                    )
-                    addListener(
-                        onStart = { isAnimating = true },
-                        onEnd = {
-                            isAnimating = false
-                            if (pendingOrientationChange) {
-                                pendingOrientationChange = false
-                                onFreeFormRotationChanged()
-                            }
-                        }
-                    )
-                    duration = 250
-                    interpolator = DecelerateInterpolator()
-                    start()
+                // Commit the resized size with scale=1 so touch mapping stays valid
+                mScaleX = 1f
+                mScaleY = 1f
+                binding.freeformRoot.scaleX = 1f
+                binding.freeformRoot.scaleY = 1f
+                try {
+                    windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                        width = freeformWidth
+                        height = freeformHeight
+                    })
+                } catch (_: Exception) {
+                }
+                refreshTouchScale()
+                refreshActionScale()
+                if (pendingOrientationChange) {
+                    pendingOrientationChange = false
+                    onFreeFormRotationChanged()
                 }
             }
             isZoomOut = false

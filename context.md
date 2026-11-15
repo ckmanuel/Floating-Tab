@@ -40,3 +40,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Released alpha-11-3cd4715 (close button fix). Download: https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-11-3cd4715
 - 2026-11-15: Renumbered all alpha release titles chronologically to Alpha 1 … Alpha 10 (oldest→newest). Explained why v1.0.0 appears mid-list (newer alphas published after it). Updated workflow for clearer future alpha titles.
 - 2026-11-15: Freeform sizing rewrite — always fit current physical screen; keep app native orientation; raised default freeform_size 75→90 and freeform_size_land 90→95; removed portrait-on-landscape 0.55 width cap that caused overflow.
+- 2026-11-15: Freeform uses 90-95% of screen by default; resize updates real LayoutParams (fixes portrait freeze); max resize 95% of screen.
