@@ -750,6 +750,9 @@ class FreeformView(
 
         windowLayoutParams.apply {
             type = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            // Center gravity: x/y are offsets from screen center (0,0 = centered).
+            // Matches toScreenCenter(), hang-up docking math, and drag clamping.
+            gravity = Gravity.CENTER
             flags =
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
@@ -1175,18 +1178,30 @@ class FreeformView(
     }
 
     /** Move the freeform window by a delta (used while dragging the move bar).
-     *  Clamps so the freeform stays fully within the physical display. */
+     *  Clamps so the freeform stays fully within the physical display.
+     *  x/y are center-offsets (Gravity.CENTER): 0,0 = screen center. */
     private fun moveFreeformBy(dx: Float, dy: Float) {
         if (isFloating || isDestroy) return
         try {
-            val newX = windowLayoutParams.x + dx.roundToInt()
-            val newY = windowLayoutParams.y + dy.roundToInt()
-            // Keep the entire freeform on-screen (TOP|START gravity offsets)
-            val maxX = (realScreenWidth - windowLayoutParams.width).coerceAtLeast(0)
-            val maxY = (realScreenHeight - windowLayoutParams.height).coerceAtLeast(0)
+            val w = windowLayoutParams.width
+            val h = windowLayoutParams.height
+            // Live oriented bounds — avoid realScreenWidth/Height rotation-swap lag
+            val (screenW, screenH) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val rect = windowManager.currentWindowMetrics.bounds
+                rect.width() to rect.height()
+            } else {
+                val dm = context.resources.displayMetrics
+                dm.widthPixels to dm.heightPixels
+            }
+            // With Gravity.CENTER, keep the whole window on-screen:
+            //   |x| <= (screenW - w) / 2,  |y| <= (screenH - h) / 2
+            val maxX = ((screenW - w) / 2).coerceAtLeast(0)
+            val maxY = ((screenH - h) / 2).coerceAtLeast(0)
+            val newX = (windowLayoutParams.x + dx.roundToInt()).coerceIn(-maxX, maxX)
+            val newY = (windowLayoutParams.y + dy.roundToInt()).coerceIn(-maxY, maxY)
             windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                x = newX.coerceIn(0, maxX)
-                y = newY.coerceIn(0, maxY)
+                x = newX
+                y = newY
             })
         } catch (_: Exception) {
         }
