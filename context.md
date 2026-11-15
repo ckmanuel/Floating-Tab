@@ -54,3 +54,4 @@ Android freeform / floating windows app (fork of Mi-Freeform / Flyme freeform).
 - 2026-11-15: Fixed drag clamp alignment — coordinates are center-offsets (Gravity.CENTER, 0,0 = screen center), not top-left. Clamp uses live WindowMetrics bounds and ±(screen-size)/2 limits.
 - 2026-11-15: Released alpha-21-c80c0b2 (drag clamp center-gravity fix). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-21-c80c0b2
 - 2026-11-15: Hang-up (mini) freeform drag also clamped on-screen via shared clampCenterOnScreen(); final snap Y clamped too.
+- 2026-11-15: Released alpha-23-f7ebe3c (hang-up drag on-screen clamp). https://github.com/ckmanuel/Floating-Tab/releases/tag/alpha-23-f7ebe3c
